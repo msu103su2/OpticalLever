@@ -21,7 +21,7 @@ psVoltageRange = {
 }
 
 #functions to simplify codes
-def searchDevice(px, UC2, PM400, HP4395a, searchDirection):
+def searchDevice(searchDirection):
     #start from void
     newLog = np.array([px[-1]])
     #PM400.setAvgCnt(c_int16(10))
@@ -38,30 +38,29 @@ def searchDevice(px, UC2, PM400, HP4395a, searchDirection):
 
     return newLog
 
-def scanDevice(px, UC2, PM400, HP4395a, scanDirection, numberOfScan, deviceCount):
-    newLog = np.array([px[-1]])
-    moveAround()
+def scanDevice(deviceCount):
+    newLog = moveAround()
     BW = 30
     POIN = 801
-    POWE = -20
+    POWE = -50
     fstart = 1e5
-    fend = 2.5e6
+    fend = 5e6
     fstep = 2.4e4
-    HP4395a.sweep([fstart, fend, fstep, BW, POIN, POWE], [filename])
-    print('step = %.0f; stransmitted power = %.2fuW; One PSD obtained, device = %02i'%(newLog[-1][0],newLog[-1][1]*1e6, deviceCount))
+    #HP4395a.sweep([fstart, fend, fstep, BW, POIN, POWE], [filename])
+    print('step = %.0f; BPD voltage = %.2fmV; One PSD obtained, device = %02i'%(newLog[-1][0],newLog[-1][1], deviceCount))
     return newLog
 
-def travel(px, UC2, PM400, HP4395a, travelDirection):
+def travel(travelDirection):
     # start from last device
     firstJump = 550 * travelDirection
     UC2.PR(controllerAddress, firstJump, err)
     time.sleep(5)
     newLog = np.array([[firstJump+px[-1][0], readVoltage()]])
-    print('step = %.0f; stransmitted power = %.2fuW;'%(newLog[-1][0],newLog[-1][1]*1e6))
+    print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
     return newLog
 
 def hasnext(i, px):
-    return i < 19 and abs(px[-1][0]) < 14000;
+    return i <= 17 and abs(px[-1][0]) < 14000;
 
 def CollectModes(filenameRegx, directory = workingDirectory):
     pksLocation = []
@@ -74,18 +73,19 @@ def CollectModes(filenameRegx, directory = workingDirectory):
         pksLocation.extend(PSD[pksIndex,0])
     return pksLocation
 
-def fineOnModes(HP4395a, pksLocation, deviceCount):
+def fineOnModes(pksLocation, deviceCount):
     BW = 2;
     POIN = 201;
     POWE = -50;
     fSTEP = 400;
-    filelist = glob.glob(workingDirectory+'\\'+filenameRegx)
     for pkF in pksLocation:
         HP4395a.sweep([int(pkF) - fSTEP/2, int(pkF) + fSTEP/2, fSTEP, BW, POIN, POWE], ['%02iCF=%iHz'%(deviceCount,pkF)])
         #HP4395a.sweep([int(pkF) - 100, int(pkF) + 100, fSTEP, BW, POIN, POWE+20], ['%02iCF=%iHz_Oc'%(pkF)]) #try overdrive
         HP4395a.inst.write('POWE '+ str(int(POWE)))
 
-def readVoltage(chARange):
+def readVoltage():
+    global chARange
+    maxSamples = 100
     while chARange < max(psVoltageRange.keys()):
         overrange = False
         preTriggerSamples = 100
@@ -156,7 +156,7 @@ def readVoltage(chARange):
             status["setChA"] = ps.ps5000aSetChannel(chandle, channel, 1, coupling_type, chARange, 0) #enabled = 1, analogue offset = 0 V
             assert_pico_ok(status["setChA"])
             break
-
+    maxSamples = 10000
     preTriggerSamples = 100
     status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
     assert_pico_ok(status["runBlock"])
@@ -187,21 +187,27 @@ def readVoltage(chARange):
 
     adc2mVChA = adc2mV(bufferA, chARange, maxADC)
     avg = adc2mVChA[0]
-    print(psVoltageRange[chARange])
     return avg
+
 def moveAround():
     avg = readVoltage()
     totalTrial = 0
+    newLog = np.array([[px[-1][0], avg]])
     while abs(avg) > 1:
         if avg > 0 :
             UC2.PR(controllerAddress, 1, err)
-            print('+')
+            time.sleep(0.5)
+            avg = readVoltage()
+            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
+            print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         else:
             UC2.PR(controllerAddress, -1, err)
-            print('-')
-        time.sleep(0.5)
-        avg = readVoltage()
+            time.sleep(0.5)
+            avg = readVoltage()
+            newLog = np.append(newLog, [[-1 + newLog[-1][0], avg]], axis = 0)
+            print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         totalTrial += 1
+    return newLog
 
 #initialize PM400
 PM400 = TLPM.TLPM()
@@ -254,18 +260,16 @@ assert_pico_ok(status["getTimebase2"])
 
 #connect to Database
 DeviceDB = mysql.connector.connect(user='shanhao', password = 'SloanGW@138', host = '136.142.206.151', database='DeviceDB',port = '3307')
-print(readVoltage(chARange))
-#fineOnModes(HP4395a,'%s_%02i_*'%('000_13', 5), 5)
 
-"""
+
 i = 1;
 while (hasnext(i, px)):
-    newLog = searchDevice(px, UC2, PM400, HP4395a, -1)
+    newLog = searchDevice(-1)
     px = np.append(px, newLog, axis = 0)
-    newLog = scanDevice(px, UC2, PM400, HP4395a, -1, 1, i)
+    newLog = scanDevice(i)
     px = np.append(px, newLog, axis = 0)
-    fineOnModes(HP4395a,CollectModes('%s_%02i_*'%('000_13', i)), i)
-    newLog = travel(px, UC2, PM400, HP4395a, -1)
+    fineOnModes(CollectModes('%s_%02i_*'%('000_21', i)), i)
+    newLog = travel(-1)
     px = np.append(px, newLog, axis = 0)
     i = i + 1;
 
@@ -274,7 +278,7 @@ with open(workingDirectory+'\\'+'StepLog.csv', mode='w', newline='') as csvfile:
     csvwriter = csv.writer(csvfile)
     csvwriter.writerow(fileds)
     csvwriter.writerows(px)
-"""
+
 HP4395a.close()
 PM400.close()
 UC2.CloseInstrument()
