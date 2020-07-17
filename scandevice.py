@@ -9,13 +9,16 @@ from ctypes import cdll, c_long, c_ulong, c_uint32, byref, create_string_buffer,
 import numpy as np
 import time
 from scipy.signal import find_peaks
+from scipy import signal
 import glob
 import csv
+from math import floor, ceil
 import mysql.connector
 from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import assert_pico_ok, adc2mV
+import matplotlib.pyplot as plt
 
-workingDirectory = r'Z:\data\optical lever project\Die 000_21\test'
+workingDirectory = r'Z:\data\optical lever project\Die 000_21\02_scanPSDs'
 psVoltageRange = {
     0 : 10, 1 : 20, 2 : 50, 3 : 100, 4 : 200, 5 : 500, 6 : 1000, 7 : 2000, 8 : 5000, 9 : 10000, 10 : 20000
 }
@@ -24,7 +27,7 @@ psVoltageRange = {
 def searchDevice(searchDirection):
     #start from void
     newLog = np.array([px[-1]])
-    #PM400.setAvgCnt(c_int16(10))
+    autoRange()
     minReflected = readVoltage()
     newLog = np.append(newLog, [[newLog[-1][0], minReflected]], axis = 0)
     print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
@@ -33,6 +36,7 @@ def searchDevice(searchDirection):
         step = 5 * searchDirection
         UC2.PR(controllerAddress, step, err)
         time.sleep(1)
+        autoRange()
         newLog = np.append(newLog, [[step+newLog[-1][0], readVoltage()]], axis = 0)
         print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
 
@@ -44,17 +48,18 @@ def scanDevice(deviceCount):
     POIN = 801
     POWE = -50
     fstart = 1e5
-    fend = 5e6
+    fend = 4.9e6
     fstep = 2.4e4
-    #HP4395a.sweep([fstart, fend, fstep, BW, POIN, POWE], [filename])
+    filename = ('000_21_%02i'%(deviceCount))
+    HP4395a.sweep([fstart, fend, fstep, BW, POIN, POWE], [filename])
     print('step = %.0f; BPD voltage = %.2fmV; One PSD obtained, device = %02i'%(newLog[-1][0],newLog[-1][1], deviceCount))
     return newLog
-
 def travel(travelDirection):
     # start from last device
     firstJump = 550 * travelDirection
     UC2.PR(controllerAddress, firstJump, err)
     time.sleep(5)
+    autoRange()
     newLog = np.array([[firstJump+px[-1][0], readVoltage()]])
     print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
     return newLog
@@ -83,7 +88,93 @@ def fineOnModes(pksLocation, deviceCount):
         #HP4395a.sweep([int(pkF) - 100, int(pkF) + 100, fSTEP, BW, POIN, POWE+20], ['%02iCF=%iHz_Oc'%(pkF)]) #try overdrive
         HP4395a.inst.write('POWE '+ str(int(POWE)))
 
+def readAmplitude(binWidth, spectrumRange, checkRange):
+
+    requiredMeasureTime = 2 * np.pi / binWidth
+    requiredSamplingInterval = np.pi / spectrumRange
+    timebase = floor(requiredSamplingInterval * 62500000 + 3)
+    timeInternalns = c_float()
+    returnedMaxSamples = c_int32()
+    maxSamples = ceil(spectrumRange / binWidth)
+    status["getTimebase2"] = ps.ps5000aGetTimebase2(chandle, timebase, maxSamples, byref(timeInternalns),byref(returnedMaxSamples), 0)
+    assert_pico_ok(status["getTimebase2"])
+    assert timeInternalns.value < requiredSamplingInterval * 1e9
+
+    preTriggerSamples = 100
+    status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
+    assert_pico_ok(status["runBlock"])
+
+    ready = c_int16(0)
+    check = c_int16(0)
+    while ready.value == check.value:
+        status["isReady"] = ps.ps5000aIsReady(chandle, byref(ready))
+
+    bufferA = (c_int16 * maxSamples)()
+    source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_A"]
+    status["setDataBufferA"] = ps.ps5000aSetDataBuffer(chandle, source, byref(bufferA), maxSamples, 0, 0)
+    assert_pico_ok(status["setDataBufferA"])
+
+    overflow = c_int16()
+    cmaxSamples = c_uint32(maxSamples)
+    status["getValues"] = ps.ps5000aGetValues(chandle, 0 , byref(cmaxSamples), 0, 0, 0, byref(overflow))
+    assert_pico_ok(status["getValues"])
+
+    maxADC = c_int16()
+    status["maximumValue"] = ps.ps5000aMaximumValue(chandle, byref(maxADC))
+    assert_pico_ok(status["maximumValue"])
+
+    timeSignal = adc2mV(bufferA, chARange, maxADC)
+    print(2 * np.pi / (timeInternalns.value / 1e9))
+    f, PSD = signal.periodogram(timeSignal, 2 * np.pi / (timeInternalns.value / 1e9))
+    plt.plot(f, PSD)
+    plt.show()
+    startIndex = f.searchsorted(checkRange[0]) - 1
+    endIndex = f.searchsorted(checkRange[1]) + 1
+    f = f[startIndex:endIndex]
+    PSD = PSD[startIndex:endIndex] - PSD.mean()
+    Index, _ = find_peaks(PSD, distance = PSD.size)
+    PSD = 10 * np.log10(10 * PSD)
+    plt.plot(f, PSD)
+    plt.plot(f[Index], PSD[Index], "x")
+    plt.show()
+    return PSD[Index]
+
 def readVoltage():
+
+    maxSamples = 10000
+    preTriggerSamples = 100
+    status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
+    assert_pico_ok(status["runBlock"])
+
+    ready = c_int16(0)
+    check = c_int16(0)
+    while ready.value == check.value:
+        status["isReady"] = ps.ps5000aIsReady(chandle, byref(ready))
+
+    bufferA = (c_int16 * 2)()
+    source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_A"]
+    downSampleTatioMode = ps.PS5000A_RATIO_MODE["PS5000A_RATIO_MODE_AVERAGE"]
+    status["setDataBufferA"] = ps.ps5000aSetDataBuffer(chandle, source, byref(bufferA), 2, 0, downSampleTatioMode)
+    assert_pico_ok(status["setDataBufferA"])
+
+    maxDownSampleRatio = c_uint32()
+    status["dwonSample"] = ps.ps5000aGetMaxDownSampleRatio(chandle, maxSamples, byref(maxDownSampleRatio), downSampleTatioMode, 0)
+    assert_pico_ok(status["dwonSample"])
+
+    overflow = c_int16()
+    cmaxSamples = c_uint32(maxSamples)
+    status["getValues"] = ps.ps5000aGetValues(chandle, 0 , byref(cmaxSamples), maxDownSampleRatio, downSampleTatioMode, 0, byref(overflow))
+    assert_pico_ok(status["getValues"])
+
+    maxADC = c_int16()
+    status["maximumValue"] = ps.ps5000aMaximumValue(chandle, byref(maxADC))
+    assert_pico_ok(status["maximumValue"])
+
+    adc2mVChA = adc2mV(bufferA, chARange, maxADC)
+    avg = adc2mVChA[0]
+    return avg
+
+def autoRange():
     global chARange
     maxSamples = 100
     while chARange < max(psVoltageRange.keys()):
@@ -156,58 +247,51 @@ def readVoltage():
             status["setChA"] = ps.ps5000aSetChannel(chandle, channel, 1, coupling_type, chARange, 0) #enabled = 1, analogue offset = 0 V
             assert_pico_ok(status["setChA"])
             break
-    maxSamples = 10000
-    preTriggerSamples = 100
-    status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
-    assert_pico_ok(status["runBlock"])
-
-    ready = c_int16(0)
-    check = c_int16(0)
-    while ready.value == check.value:
-        status["isReady"] = ps.ps5000aIsReady(chandle, byref(ready))
-
-    bufferA = (c_int16 * 2)()
-    source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_A"]
-    downSampleTatioMode = ps.PS5000A_RATIO_MODE["PS5000A_RATIO_MODE_AVERAGE"]
-    status["setDataBufferA"] = ps.ps5000aSetDataBuffer(chandle, source, byref(bufferA), 2, 0, downSampleTatioMode)
-    assert_pico_ok(status["setDataBufferA"])
-
-    maxDownSampleRatio = c_uint32()
-    status["dwonSample"] = ps.ps5000aGetMaxDownSampleRatio(chandle, maxSamples, byref(maxDownSampleRatio), downSampleTatioMode, 0)
-    assert_pico_ok(status["dwonSample"])
-
-    overflow = c_int16()
-    cmaxSamples = c_uint32(maxSamples)
-    status["getValues"] = ps.ps5000aGetValues(chandle, 0 , byref(cmaxSamples), maxDownSampleRatio, downSampleTatioMode, 0, byref(overflow))
-    assert_pico_ok(status["getValues"])
-
-    maxADC = c_int16()
-    status["maximumValue"] = ps.ps5000aMaximumValue(chandle, byref(maxADC))
-    assert_pico_ok(status["maximumValue"])
-
-    adc2mVChA = adc2mV(bufferA, chARange, maxADC)
-    avg = adc2mVChA[0]
-    return avg
 
 def moveAround():
+    autoRange()
     avg = readVoltage()
     totalTrial = 0
     newLog = np.array([[px[-1][0], avg]])
-    while abs(avg) > 1:
-        if avg > 0 :
+    while abs(avg + 0.65) > 1:
+        if avg + 0.65 > 0 :
             UC2.PR(controllerAddress, 1, err)
             time.sleep(0.5)
+            autoRange()
             avg = readVoltage()
             newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
             print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         else:
             UC2.PR(controllerAddress, -1, err)
             time.sleep(0.5)
+            autoRange()
             avg = readVoltage()
-            newLog = np.append(newLog, [[-1 + newLog[-1][0], avg]], axis = 0)
+            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
             print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         totalTrial += 1
     return newLog
+"""
+    autoRange()
+    avg = readVoltage()
+    totalTrial = 0
+    newLog = np.array([[px[-1][0], avg]])
+    while readAmplitude(30, 15e6, [20e3, 200e3]) > 5:
+        if avg + 0.65 > 0 :
+            UC2.PR(controllerAddress, 1, err)
+            time.sleep(0.5)
+            autoRange()
+            avg = readVoltage()
+            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
+            print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
+        else:
+            UC2.PR(controllerAddress, -1, err)
+            time.sleep(0.5)
+            autoRange()
+            avg = readVoltage()
+            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
+            print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
+        totalTrial += 1
+        """
 
 #initialize PM400
 PM400 = TLPM.TLPM()
@@ -260,15 +344,15 @@ assert_pico_ok(status["getTimebase2"])
 
 #connect to Database
 DeviceDB = mysql.connector.connect(user='shanhao', password = 'SloanGW@138', host = '136.142.206.151', database='DeviceDB',port = '3307')
+moveAround()
 
-
-i = 1;
+i = 2;
 while (hasnext(i, px)):
     newLog = searchDevice(-1)
     px = np.append(px, newLog, axis = 0)
     newLog = scanDevice(i)
     px = np.append(px, newLog, axis = 0)
-    fineOnModes(CollectModes('%s_%02i_*'%('000_21', i)), i)
+    #fineOnModes(CollectModes('%s_%02i_*'%('000_21', i)), i)
     newLog = travel(-1)
     px = np.append(px, newLog, axis = 0)
     i = i + 1;
