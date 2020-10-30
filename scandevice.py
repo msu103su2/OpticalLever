@@ -18,7 +18,7 @@ from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import assert_pico_ok, adc2mV
 import matplotlib.pyplot as plt
 
-workingDirectory = r'Z:\data\optical lever project\Die 000_21\02_scanPSDs'
+workingDirectory = r'Z:\data\optical lever project\Die 000_21\03_scanPSDs'
 psVoltageRange = {
     0 : 10, 1 : 20, 2 : 50, 3 : 100, 4 : 200, 5 : 500, 6 : 1000, 7 : 2000, 8 : 5000, 9 : 10000, 10 : 20000
 }
@@ -46,7 +46,7 @@ def scanDevice(deviceCount):
     newLog = moveAround()
     BW = 30
     POIN = 801
-    POWE = -50
+    POWE = -30
     fstart = 1e5
     fend = 4.9e6
     fstep = 2.4e4
@@ -88,10 +88,11 @@ def fineOnModes(pksLocation, deviceCount):
         #HP4395a.sweep([int(pkF) - 100, int(pkF) + 100, fSTEP, BW, POIN, POWE+20], ['%02iCF=%iHz_Oc'%(pkF)]) #try overdrive
         HP4395a.inst.write('POWE '+ str(int(POWE)))
 
-def readAmplitude(binWidth, spectrumRange, checkRange):
+def readAmplitude(binWidth, spectrumRange, checkRange, nmbOfAvg):
 
-    requiredMeasureTime = 2 * np.pi / binWidth
-    requiredSamplingInterval = np.pi / spectrumRange
+    spectrumRange = spectrumRange * 2
+    requiredMeasureTime = 2 / binWidth
+    requiredSamplingInterval = 1 / spectrumRange
     timebase = floor(requiredSamplingInterval * 62500000 + 3)
     timeInternalns = c_float()
     returnedMaxSamples = c_int32()
@@ -100,43 +101,46 @@ def readAmplitude(binWidth, spectrumRange, checkRange):
     assert_pico_ok(status["getTimebase2"])
     assert timeInternalns.value < requiredSamplingInterval * 1e9
 
-    preTriggerSamples = 100
-    status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
-    assert_pico_ok(status["runBlock"])
+    for i in range(nmbOfAvg):
+        preTriggerSamples = 100
+        status["runBlock"] = ps.ps5000aRunBlock(chandle, preTriggerSamples, maxSamples, timebase, None, 0, None, None)
+        assert_pico_ok(status["runBlock"])
 
-    ready = c_int16(0)
-    check = c_int16(0)
-    while ready.value == check.value:
-        status["isReady"] = ps.ps5000aIsReady(chandle, byref(ready))
+        ready = c_int16(0)
+        check = c_int16(0)
+        while ready.value == check.value:
+            status["isReady"] = ps.ps5000aIsReady(chandle, byref(ready))
 
-    bufferA = (c_int16 * maxSamples)()
-    source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_A"]
-    status["setDataBufferA"] = ps.ps5000aSetDataBuffer(chandle, source, byref(bufferA), maxSamples, 0, 0)
-    assert_pico_ok(status["setDataBufferA"])
+        bufferA = (c_int16 * maxSamples)()
+        source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_A"]
+        status["setDataBufferA"] = ps.ps5000aSetDataBuffer(chandle, source, byref(bufferA), maxSamples, 0, 0)
+        assert_pico_ok(status["setDataBufferA"])
 
-    overflow = c_int16()
-    cmaxSamples = c_uint32(maxSamples)
-    status["getValues"] = ps.ps5000aGetValues(chandle, 0 , byref(cmaxSamples), 0, 0, 0, byref(overflow))
-    assert_pico_ok(status["getValues"])
+        overflow = c_int16()
+        cmaxSamples = c_uint32(maxSamples)
+        status["getValues"] = ps.ps5000aGetValues(chandle, 0 , byref(cmaxSamples), 0, 0, 0, byref(overflow))
+        assert_pico_ok(status["getValues"])
 
-    maxADC = c_int16()
-    status["maximumValue"] = ps.ps5000aMaximumValue(chandle, byref(maxADC))
-    assert_pico_ok(status["maximumValue"])
+        maxADC = c_int16()
+        status["maximumValue"] = ps.ps5000aMaximumValue(chandle, byref(maxADC))
+        assert_pico_ok(status["maximumValue"])
 
-    timeSignal = adc2mV(bufferA, chARange, maxADC)
-    print(2 * np.pi / (timeInternalns.value / 1e9))
-    f, PSD = signal.periodogram(timeSignal, 2 * np.pi / (timeInternalns.value / 1e9))
-    plt.plot(f, PSD)
-    plt.show()
-    startIndex = f.searchsorted(checkRange[0]) - 1
-    endIndex = f.searchsorted(checkRange[1]) + 1
-    f = f[startIndex:endIndex]
-    PSD = PSD[startIndex:endIndex] - PSD.mean()
-    Index, _ = find_peaks(PSD, distance = PSD.size)
+        timeSignal = adc2mV(bufferA, chARange, maxADC)
+        f, newPSD = signal.periodogram(timeSignal, 1 / (timeInternalns.value / 1e9), window = signal.get_window('blackman', len(timeSignal)))
+        startIndex = f.searchsorted(checkRange[0]) - 1
+        endIndex = f.searchsorted(checkRange[1]) + 1
+        f = f[startIndex:endIndex]
+        newPSD = newPSD[startIndex:endIndex]
+        if i == 0:
+            PSD = np.array(newPSD)
+        else:
+            PSD = PSD + newPSD
+
+    PSD = PSD/nmbOfAvg;
+
     PSD = 10 * np.log10(10 * PSD)
-    plt.plot(f, PSD)
-    plt.plot(f[Index], PSD[Index], "x")
-    plt.show()
+    PSD = PSD - PSD.mean()
+    Index, _ = find_peaks(PSD, distance = PSD.size)
     return PSD[Index]
 
 def readVoltage():
@@ -266,32 +270,30 @@ def moveAround():
             time.sleep(0.5)
             autoRange()
             avg = readVoltage()
-            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
+            newLog = np.append(newLog, [[-1 + newLog[-1][0], avg]], axis = 0)
             print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         totalTrial += 1
-    return newLog
-"""
+
     autoRange()
     avg = readVoltage()
     totalTrial = 0
-    newLog = np.array([[px[-1][0], avg]])
-    while readAmplitude(30, 15e6, [20e3, 200e3]) > 5:
+    while readAmplitude(30, 15e6, [50e3, 200e3], 20) > 7:
         if avg + 0.65 > 0 :
             UC2.PR(controllerAddress, 1, err)
-            time.sleep(0.5)
+            time.sleep(1)
             autoRange()
             avg = readVoltage()
             newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
             print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         else:
             UC2.PR(controllerAddress, -1, err)
-            time.sleep(0.5)
+            time.sleep(1)
             autoRange()
             avg = readVoltage()
-            newLog = np.append(newLog, [[1 + newLog[-1][0], avg]], axis = 0)
+            newLog = np.append(newLog, [[-1 + newLog[-1][0], avg]], axis = 0)
             print('step = %.0f; BPD voltage = %.2fmV;'%(newLog[-1][0],newLog[-1][1]))
         totalTrial += 1
-        """
+    return newLog
 
 #initialize PM400
 PM400 = TLPM.TLPM()
@@ -344,9 +346,9 @@ assert_pico_ok(status["getTimebase2"])
 
 #connect to Database
 DeviceDB = mysql.connector.connect(user='shanhao', password = 'SloanGW@138', host = '136.142.206.151', database='DeviceDB',port = '3307')
-moveAround()
 
-i = 2;
+
+i = 16;
 while (hasnext(i, px)):
     newLog = searchDevice(-1)
     px = np.append(px, newLog, axis = 0)

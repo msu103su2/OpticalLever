@@ -11,7 +11,7 @@ class AgilentNA:
 
     def __init__(self, workingDirectory):
         self.rm = pyvisa.ResourceManager()
-        self.inst = self.rm.open_resource('GPIB0::17::INSTR')
+        self.inst = self.rm.open_resource('GPIB1::17::INSTR')
         self.inst.write_termination = '\r'
         self.inst.timeout = 20000
         self.workingDirectory = workingDirectory + '\\'
@@ -203,6 +203,14 @@ class AgilentNA:
     def close(self):
         self.rm.close()
 
+    def center(self, values):
+        self.inst.write('CENT '+str(int(values[0])))
+        self.inst.write('SPAN '+str(int(values[1])))
+
+    def pkt(self):
+        self.inst.write('SEAM PEAK')
+        self.inst.write('MKRCENT')
+        self.inst.write('SPAN 0')
 
 def main(argv):
     parser = argparse.ArgumentParser(description = 'Convenient command for ring down measurements')
