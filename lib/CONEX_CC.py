@@ -3,6 +3,9 @@ import time
 import re
 ReadyT = ['1TS000036','1TS000037','1TS000038']
 Ready = ['1TS000032','1TS000033','1TS000034']
+Disable = ['1TS00003D']
+DisableT = ['1TS00003E']
+Tracking = ['1TS000046']
 class CONEX_CC:
     """docstring for CONEX_CC."""
 
@@ -42,19 +45,36 @@ class CONEX_CC:
         return float(re.findall('1TP-*([0-9]+([.]+[0-9]*)*)',self.inst.query('1TP'))[0][0])
 
     def MoveTo(self, position):
-        while not (self.IsReadyT() or self.IsReady()):
-            time.sleep(1)
+        self.WaitForReady()
         self.inst.write('1PA'+str(position))
-        while not (self.IsReadyT() or self.IsReady()):
-            time.sleep(1)
+        while not self.WaitForReady():
+            self.inst.write('1PA'+str(position))
         self.x = self.Position()
 
+    def ErrorHandler(self):
+        state = self.inst.query('1TS')
+        if state in Disable+DisableT:
+            self.inst.write('1MM1')
+        elif state in Tracking:
+            self.inst.write('1ST')
+
+    def WaitForReady(self):
+        waitTime = 0;
+        queryInterval = 1;#in unit of sec
+        JobDone = True
+        while not (self.IsReadyT() or self.IsReady()):
+            time.sleep(queryInterval)
+            waitTime += queryInterval
+            if waitTime > 10:
+                self.ErrorHandler()
+                JobDone = False
+                break
+        return JobDone
+
     def MoveBy(self, displacement):
-        while not (self.IsReadyT() or self.IsReady()):
-            time.sleep(1)
+        self.WaitForReady()
         self.inst.write('1PR'+str(displacement))
-        while not (self.IsReadyT() or self.IsReady()):
-            time.sleep(1)
+        self.WaitForReady()
         self.x = self.Position()
 
     def close(self):

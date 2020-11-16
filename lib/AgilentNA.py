@@ -5,11 +5,12 @@ import os
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+import lib.redpitaya_scpi as scpi
 from datetime import date
 
 class AgilentNA:
 
-    def __init__(self, workingDirectory):
+    def __init__(self, workingDirectory = r'D:\temp'):
         self.rm = pyvisa.ResourceManager()
         self.inst = self.rm.open_resource('GPIB1::17::INSTR')
         self.inst.write_termination = '\r'
@@ -20,27 +21,8 @@ class AgilentNA:
         self.inst.write('MEAS R')
         self.inst.write('ESNB 1')
         self.inst.write('*SRE 4')
-
-    def save(self):
-        today = date.today()
-        directory = r'Z:\data\optical lever project'+'\\'+today.strftime("%Y_%m_%d")+'\\'
-        self.inst.write('FORM3')
-        y = self.inst.query_binary_values('OUTPDTRC?',datatype='d', is_big_endian=True)
-        SWET = float(self.inst.query('SWET?'))
-        POIN = int(self.inst.query('POIN?'))
-        times = list(np.arange(0,SWET,SWET/POIN))
-        pw = y[::2]
-
-        rows = []
-        fileds = ['Time(s)','Power(dB)']
-        for i in range(0,len(times)):
-            rows.append([times[i],pw[i]])
-        centF =str(float(self.inst.query('CENT?'))/1e6)
-        filename =  'f='+centF+'MHz.csv'
-        with open(directory+filename, mode='w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(fileds)
-            csvwriter.writerows(rows)
+        self.inst.write('BW 30')
+        self.inst.write('MKR ON')
 
     def savePSD(self, DeviceSN):
         self.inst.write('FORM3')
@@ -74,6 +56,12 @@ class AgilentNA:
             csvwriter = csv.writer(csvfile)
             csvwriter.writerow(fileds)
             csvwriter.writerows(rows)
+
+    def getTrace(self):
+        self.inst.write('FORM3')
+        y = self.inst.query_binary_values('OUTPDTRC?',datatype='d', is_big_endian=True)
+        pw = y[::2]
+        return pw
 
     def rf(self, args):
         dB = args[0]
@@ -129,15 +117,6 @@ class AgilentNA:
         self.inst.write('CLES')
         self.inst.write('SING')
 
-    def ringdown(self):
-        c = 20+float(self.inst.query('POWE?'))
-        self.inst.write('POWE '+str(c))
-        self.inst.write('POIN 401')
-        self.inst.write('SPAN 0')
-        self.inst.write('BW 100')
-        self.inst.write('CLES')
-        self.inst.write('SING')
-
     def freqdomain(self):
         self.inst.write('CONT')
         self.inst.write('POWE -50')
@@ -188,17 +167,49 @@ class AgilentNA:
         plt.plot(x, y[::2])
         plt.show()
 
-    def ringdownRemote(self, values):
-        dB = values[0]
+    def ringdown(self, values):
+        amp = values[0]
+        zx80 = values[1]
+        FG = values[2]
+
+        zx80.RF2Off()
         self.inst.write('SPAN 0')
-        self.inst.write('POWE '+str(int(dB)))
         self.inst.write('POIN 801')
         self.inst.write('BW 100')
-        time.sleep(2)
-        self.inst.write('POWE -70')
-        self.inst.write('CLES')
-        self.inst.write('SING')
-        showScreen(self)
+        noiseFloor,_ = self.getNoiseFloor([zx80])
+
+        freq = str(float(self.inst.query('CENT?')))
+        FG.Sine(freq, amp)
+        zx80.RF1On()
+
+        stable = False
+        count = 0
+        powerUpCount = 0
+        while not stable and powerUpCount < 2:
+            self.inst.write('CLES')
+            self.inst.write('SING')
+            self.auto()
+            while not self.IsFinish():
+                time.sleep(2)
+            pw = self.getTrace()
+            if np.std(pw) < 0.03*(np.mean(pw)-noiseFloor):
+                stable = True
+            count += 1
+            if (count > 3):
+                self.rfu()
+                count = 0
+                powerUpCount += 1
+
+        if powerUpCount < 2:
+            self.inst.write('CLES')
+            self.inst.write('SING')
+            time.sleep(2)
+            zx80.RF1Off()
+            FG33522b.write('OUTP OFF')
+            self.auto()
+            while not self.IsFinish():
+                time.sleep(2)
+            self.savePSD('rd')
 
     def close(self):
         self.rm.close()
@@ -211,6 +222,17 @@ class AgilentNA:
         self.inst.write('SEAM PEAK')
         self.inst.write('MKRCENT')
         self.inst.write('SPAN 0')
+
+    def getNoiseFloor(self, values):
+        zx80 = values[0]
+        zx80.RF1Off()
+        zx80.RF2Off()
+        self.inst.write('CLES')
+        self.inst.write('SING')
+        self.auto()
+        while not self.IsFinish():
+            time.sleep(2)
+        return np.mean(self.getTrace()), np.std(self.getTrace())
 
 def main(argv):
     parser = argparse.ArgumentParser(description = 'Convenient command for ring down measurements')

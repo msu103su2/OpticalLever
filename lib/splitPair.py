@@ -55,7 +55,7 @@ class splitPair:
                     allCaptured = True
             else:
                 allCaptured = False
-
+        rows[:,0] = rows[:,0]/1000
         middleP = (rows[:,1].min()+rows[:,1].max())/2
         middleIndex = np.argmin(abs(rows[:,1]-middleP))
         middleX = rows[middleIndex,0]
@@ -63,10 +63,10 @@ class splitPair:
         cutIndex = min(middleIndex - stepsToCenter,0)
         x = rows[cutIndex:,0]
         P = rows[cutIndex:,1]
-        popt, pcov = curve_fit(func, x, P, p0 =[middleX, np.pi/2.7, 2*middleP], \
+        popt= curve_fit(func, x, P, p0 =[middleX, np.pi/2.7, 2*middleP], \
             bounds = (0,[25,np.pi,np.inf]))
         plt.plot(x, P, 'b-', label='data')
-        plt.plot(x, func(x, *popt),'g--', label='fit')
+        plt.plot(x, func(x, *popt[0]),'g--', label='fit')
         plt.show()
         self.centerXinA = popt[0][0]
         self.Aangle = popt[0][1]
@@ -83,11 +83,13 @@ class splitPair:
         tempPicoHandle.DC()
         tempPicoHandle.AutoRange()
 
+        allCaptured = False
         while not allCaptured:
             self.B.MoveBy(stepscale*self.B.min_step)
             tempPicoHandle.AutoRange()
             p = -np.mean(tempPicoHandle.getTimeSignal())
             rows = np.append(rows,[[self.B.x, p]], axis = 0)
+            print(rows[-1])
             middleP = (rows[:,1].min()+rows[:,1].max())/2
             if (len(rows) > 10):
                 if(abs(rows[-1,1] - rows[-10,1])/rows[-1,1] < 0.01 \
@@ -95,7 +97,7 @@ class splitPair:
                     allCaptured = True
             else:
                 allCaptured = False
-
+        rows[:,0] = rows[:,0]/1000
         middleP = (rows[:,1].min()+rows[:,1].max())/2
         middleIndex = np.argmin(abs(rows[:,1]-middleP))
         middleX = rows[middleIndex,0]
@@ -103,10 +105,10 @@ class splitPair:
         cutIndex = min(middleIndex - stepsToCenter,0)
         x = rows[cutIndex:,0]
         P = rows[cutIndex:,1]
-        popt, pcov = curve_fit(func, x, P , p0 =[middleX, np.pi/2.7, 2*middleP], \
+        popt= curve_fit(func, x, P , p0 =[middleX, np.pi/2.7, 2*middleP], \
             bounds = (0,[25,np.pi,np.inf]))
         plt.plot(x, P, 'b-', label='data')
-        plt.plot(x, func(x, *popt),'g--', label='fit')
+        plt.plot(x, func(x, *popt[0]),'g--', label='fit')
         plt.show()
         self.centerXinB = popt[0][0]
         self.Bangle = popt[0][1]

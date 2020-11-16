@@ -145,6 +145,12 @@ class picoscope:
             self.chAcoupling_type, self.chARange, 0) #enabled = 1, analogue offset = 0 V
         assert_pico_ok(self.status["setChA"])
 
+    def AC(self):
+        self.chAcoupling_type = ps.PS5000A_COUPLING["PS5000A_AC"]
+        self.status["setChA"] = ps.ps5000aSetChannel(self.chandle, self.channel, 1,\
+            self.chAcoupling_type, self.chARange, 0) #enabled = 1, analogue offset = 0 V
+        assert_pico_ok(self.status["setChA"])
+
     def getTimeSignal(self):
         preTriggerSamples = 100
         self.status["runBlock"] = ps.ps5000aRunBlock(self.chandle, \
@@ -174,6 +180,11 @@ class picoscope:
         timeSignal = adc2mV(bufferA, self.chARange, maxADC)
         timeSignal = [x * 1e-3 for x in timeSignal]
         return timeSignal
+
+    def timeSignalStable(self):
+        S = self.timeSignal()
+        return (np.std(S) < 0.01 * np.mean(S) )
+
 
 def main(argv):
     flag = 0
