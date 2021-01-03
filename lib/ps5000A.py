@@ -129,10 +129,10 @@ class picoscope:
         self.maxSamples = orginalMaxSamples
 
     def ChangeRangeTo(self, Range):
-        keys = list(self.self.psVoltageRange.keys())
-        values = list(self.self.psVoltageRange.values())
-        if range in values:
-            self.chARange = keys(values.index(Range))
+        keys = list(self.psVoltageRange.keys())
+        values = list(self.psVoltageRange.values())
+        if Range in values:
+            self.chARange = keys[values.index(Range)]
             self.status["setChA"] = ps.ps5000aSetChannel(self.chandle, self.channel, 1, self.chAcoupling_type, self.chARange, 0) #enabled = 1, analogue offset = 0 V
             assert_pico_ok(self.status["setChA"])
         else:

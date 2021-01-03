@@ -12,23 +12,28 @@ class splitPair:
         self.B = cc.CONEX_CC('ASRL6::INSTR', False)
         self.Aangle = np.pi/2
         self.Bangle = np.pi/2
+        self.tiltAngle = 0.046
         self.centerXinA = 0
         self.centerXinB = 0
         # A B positive position is 'opposite'
-        self.Quasi_gapsize = abs(self.A.x*np.sin(self.Aangle) +\
+        self.Quasi_gapsize = np.cos(self.tiltAngle)*abs(self.A.x*np.sin(self.Aangle) +\
             self.B.x*np.sin(self.Bangle))
 
-    def MoveGapBy(self, distance):
+    def MoveGapBy(self, displacement):
         #positive direction is the same as A
-        self.A.MoveBy(distance/np.sin(self.Aangle))
-        self.B.MoveBy(-distance/np.sin(self.Bangle))
-        self.Quasi_gapsize = abs(self.A.x*np.sin(self.Aangle) +\
+        if displacement > 0:
+            self.B.MoveBy(-displacement/np.sin(self.Bangle))
+            self.A.MoveBy(displacement/np.sin(self.Aangle))
+        else:
+            self.A.MoveBy(displacement/np.sin(self.Aangle))
+            self.B.MoveBy(-displacement/np.sin(self.Bangle))
+        self.Quasi_gapsize =np.cos(self.tiltAngle)*abs(self.A.x*np.sin(self.Aangle) +\
             self.B.x*np.sin(self.Bangle))
 
     def OpenGapBy(self, size):
         self.A.MoveBy(-size/(2*np.sin(self.Aangle)))
         self.B.MoveBy(-size/(2*np.sin(self.Bangle)))
-        self.Quasi_gapsize = abs(self.A.x*np.sin(self.Aangle) +\
+        self.Quasi_gapsize = np.cos(self.tiltAngle)*abs(self.A.x*np.sin(self.Aangle) +\
             self.B.x*np.sin(self.Bangle))
 
     def CaliAngleA(self, stepscale):
@@ -60,16 +65,17 @@ class splitPair:
         middleIndex = np.argmin(abs(rows[:,1]-middleP))
         middleX = rows[middleIndex,0]
         stepsToCenter = len(rows[:,1]) - middleIndex
-        cutIndex = min(middleIndex - stepsToCenter,0)
+        cutIndex = max(middleIndex - stepsToCenter,0)
         x = rows[cutIndex:,0]
         P = rows[cutIndex:,1]
-        popt= curve_fit(func, x, P, p0 =[middleX, np.pi/2.7, 2*middleP], \
-            bounds = (0,[25,np.pi,np.inf]))
+        popt= curve_fit(func, x, P , p0 =[middleX, 75/180*np.pi, 2*middleP, self.tiltAngle], \
+            bounds = ([0,0,0,self.tiltAngle*(1-1e-3)],[25,np.pi,3*middleP,self.tiltAngle*(1+1e-3)]))
         plt.plot(x, P, 'b-', label='data')
         plt.plot(x, func(x, *popt[0]),'g--', label='fit')
         plt.show()
         self.centerXinA = popt[0][0]
         self.Aangle = popt[0][1]
+        print(self.Aangle*180/np.pi)
         self.A.MoveTo(x0)
         tempPicoHandle.close()
 
@@ -102,16 +108,17 @@ class splitPair:
         middleIndex = np.argmin(abs(rows[:,1]-middleP))
         middleX = rows[middleIndex,0]
         stepsToCenter = len(rows[:,1]) - middleIndex
-        cutIndex = min(middleIndex - stepsToCenter,0)
+        cutIndex = max(middleIndex - stepsToCenter,0)
         x = rows[cutIndex:,0]
         P = rows[cutIndex:,1]
-        popt= curve_fit(func, x, P , p0 =[middleX, np.pi/2.7, 2*middleP], \
-            bounds = (0,[25,np.pi,np.inf]))
+        popt= curve_fit(func, x, P , p0 =[middleX, 66/180*np.pi, 2*middleP, self.tiltAngle], \
+            bounds = ([0,0,0,self.tiltAngle*(1-1e-3)],[25,np.pi,3*middleP,self.tiltAngle*(1+1e-3)]))
         plt.plot(x, P, 'b-', label='data')
         plt.plot(x, func(x, *popt[0]),'g--', label='fit')
         plt.show()
         self.centerXinB = popt[0][0]
         self.Bangle = popt[0][1]
+        print(self.Bangle*180/np.pi)
         self.B.MoveTo(x0)
         tempPicoHandle.close()
 
@@ -119,6 +126,11 @@ class splitPair:
         self.A.close()
         self.B.close()
 
-def func(x, x0, angle, power):
+    def getQuasi_gapsize(self):
+        self.Quasi_gapsize = np.cos(self.tiltAngle)*abs(self.A.x*np.sin(self.Aangle) +\
+            self.B.x*np.sin(self.Bangle))
+        return self.Quasi_gapsize
+
+def func(x, x0, angle, power, tiltAngle):
     #numbers from 55mm focal lens with 30um beam waist on focal point
-        return 0.5*power*(1+special.erf(2274.97*(x-x0)*np.sin(angle)))
+    return 0.5*power*(1+special.erf(1221.4*(x-x0)*np.sin(angle)*np.cos(tiltAngle)))
