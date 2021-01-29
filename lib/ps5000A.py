@@ -11,6 +11,7 @@ from math import floor, ceil
 import matplotlib.pyplot as plt
 import csv
 import time
+import math
 
 class ch:
 
@@ -22,7 +23,6 @@ class ch:
         self.offset = 0
         self.device_handle = device_handle
         self.buffer = None
-        self.PSD = None
         self.timeSignal = None
 
     def Enable(self):
@@ -39,6 +39,8 @@ class ch:
         return ps.ps5000aSetChannel(self.device_handle, self.channel, self.enabled,\
             self.coupling_type, self.range, self.offset)
 
+    def clearMem(self):
+        self.timeSignal = None
 
 class picoscope:
 
@@ -54,70 +56,70 @@ class picoscope:
         self.workingDirectory = workingDirectory + '\\'
         self.psVoltageRange = {0 : 10, 1 : 20, 2 : 50, 3 : 100, 4 : 200, \
             5 : 500, 6 : 1000, 7 : 2000, 8 : 5000, 9 : 10000, 10 : 20000}
-        self.defaultSetting()
-
-    def defaultSetting(self):
         self.timebase = int(6000)
         self.timeInternalns = c_float()
-        self.bufferSize = c_int32()
         self.maxSamples = 10000
+        self.t = None
+        self.f = None
+
+    def defaultSetting(self):
         self.status["getTimebase2"] = ps.ps5000aGetTimebase2(self.chandle, \
             self.timebase, self.maxSamples, byref(self.timeInternalns),\
-            byref(self.bufferSize), 0)
+            None, 0)
         assert_pico_ok(self.status["getTimebase2"])
 
         self.chs['A'].coupling_type = ps.PS5000A_COUPLING["PS5000A_AC"]
         self.chs['A'].range = ps.PS5000A_RANGE["PS5000A_50MV"]
         self.status["setChA"] = self.chs['A'].Enable()
         assert_pico_ok(self.status["setChA"])
-        self.AutoRange('A')
 
         self.chs['B'].coupling_type = ps.PS5000A_COUPLING["PS5000A_AC"]
         self.chs['B'].range = ps.PS5000A_RANGE["PS5000A_50MV"]
         self.status["setChB"] = self.chs['B'].Enable()
         assert_pico_ok(self.status["setChB"])
-        self.AutoRange('B')
 
         self.chs['C'].coupling_type = ps.PS5000A_COUPLING["PS5000A_AC"]
         self.chs['C'].range = ps.PS5000A_RANGE["PS5000A_50MV"]
         self.status["setChC"] = self.chs['C'].Enable()
         assert_pico_ok(self.status["setChC"])
-        self.AutoRange('C')
 
-    def getPSD(self, binWidth, spectrumRange, nmbOfAvg):
+    def configurePSD(self, binWidth, spectrumRange, nTimes = None):
+        spectrumRange = spectrumRange * 2
+        requiredSamplingInterval = 1 / spectrumRange
+        self.timebase = floor(requiredSamplingInterval * 125000000 + 2) #14bit
+        #self.timebase = floor(requiredSamplingInterval * 62500000 + 3) #16bit
+
+        self.status["getTimebase2"] = ps.ps5000aGetTimebase2(self.chandle, \
+            self.timebase, self.maxSamples, byref(self.timeInternalns),\
+            None, 0)
+        assert_pico_ok(self.status["getTimebase2"])
+
+        requiredMeasureTime = 1 / binWidth
+        self.maxSamples = ceil(requiredMeasureTime *1e9 / self.timeInternalns.value)
+
+        assert self.timeInternalns.value < requiredSamplingInterval * 1e9
+
+        if bool(nTimes):
+            nMaxSamples = c_long()
+            ps.ps5000aMemorySegments(self.chandle, 1, byref(nMaxSamples))
+            print(nMaxSamples)
+            nMaxSamples.value = math.floor(nMaxSamples.value/self.nEnabledChannels())
+            if nTimes == 'Max':
+                nTimes = math.floor(nMaxSamples.value/(self.maxSamples))-25
+            print(nTimes, self.maxSamples)
+            assert self.maxSamples * nTimes < nMaxSamples.value
+            self.maxSamples = nTimes * self.maxSamples
+            return nTimes, int(self.maxSamples/nTimes)
+
+    def PSDfromTS(self, timeSignal, fs):
         #PSD in unit of dBm/bin, as comparison, PICO gives dBm/bin
         #gives singles-sided PSD, but energy on such single side is full energy
         #which is the same as PICO
-        spectrumRange = spectrumRange * 2
-        requiredMeasureTime = 1 / binWidth
-        requiredSamplingInterval = 1 / spectrumRange
-
-        self.timebase = floor(requiredSamplingInterval * 62500000 + 3)
-        self.timeInternalns = c_float()
-        self.bufferSize = c_int32()
-        self.maxSamples = ceil(spectrumRange / binWidth)
-        self.status["getTimebase2"] = ps.ps5000aGetTimebase2(self.chandle, \
-            self.timebase, self.maxSamples, byref(self.timeInternalns),\
-            byref(self.bufferSize), 0)
-        assert_pico_ok(self.status["getTimebase2"])
-        assert self.timeInternalns.value < requiredSamplingInterval * 1e9
-
-        for i in range(nmbOfAvg):
-            self.getTimeSignal()
-            for key in self.chs:
-                if self.chs[key].enabled:
-                    f, newPSD = signal.periodogram(self.chs[key].timeSignal, 1 / (self.timeInternalns.value / 1e9), \
-                        window = signal.get_window('blackman', len(self.chs[key].timeSignal)))
-                    if i == 0:
-                        self.chs[key].PSD = np.array(newPSD)
-                    else:
-                        self.chs[key].PSD = self.chs[key].PSD + newPSD
+        f, PSD = signal.periodogram(timeSignal, fs, \
+            window = signal.get_window('blackman', len(timeSignal)))
         self.f = f
-        for key in self.chs:
-            if self.chs[key].enabled:
-                self.chs[key].PSD = self.chs[key].PSD/nmbOfAvg
-                self.chs[key].PSD = self.chs[key].PSD/(self.timeInternalns.value/1e9*len(self.chs[key].timeSignal))
-                self.chs[key].PSD = 10 * np.log10(20 * self.chs[key].PSD)
+        PSD = PSD/(self.timeInternalns.value/1e9*len(timeSignal)) #converting from /Hz to /Bin
+        return PSD
 
     def savePSD(self, filename):
         if not os.path.exists(self.workingDirectory):
@@ -138,17 +140,12 @@ class picoscope:
         if not os.path.exists(self.workingDirectory):
             os.makedirs(self.workingDirectory)
         rows = []
-        fileds = ['t(s)', 'A(V)', 'B(V)', 'C(V)', 'D(V)']
-        for key in self.chs:
-            if not self.chs[key].enabled:
-                self.chs[key].timeSignal = [None]* len(self.t)
-        for i in range(0,len(self.f)):
-            rows.append([self.t[i], self.chs['A'].timeSignal[i], self.chs['B'].timeSignal[i], \
-                self.chs['C'].timeSignal[i], self.chs['D'].timeSignal[i]])
-        with open(self.workingDirectory+filename+'.csv', mode='w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(fileds)
-            csvwriter.writerows(rows)
+        fileds = ['A(V)', 'B(V)', 'C(V)']
+        for i in range(0,len(self.t)):
+            rows.append([self.chs['A'].timeSignal[i], self.chs['B'].timeSignal[i], \
+                self.chs['C'].timeSignal[i]])
+        nprows = np.array(rows)
+        nprows.tofile(self.workingDirectory+filename+'.bin', sep = '')
 
     def plot(self, channel):
         plt.plot(self.memory[0],self.memory[1])
@@ -194,6 +191,7 @@ class picoscope:
                 assert_pico_ok(self.status["setCh"+channel])
                 break
         self.maxSamples = orginalMaxSamples
+        self.chs[channel].clearMem()
 
     def ChangeRangeTo(self, channel, Range):
         keys = list(self.psVoltageRange.keys())
@@ -216,29 +214,30 @@ class picoscope:
         self.status["setCh"+channel] = self.chs[channel].set()
         assert_pico_ok(self.status["setCh"+channel])
 
-    def getTimeSignal(self, channel = None):
+    def getTimeSignal(self, channel = None, check = True):
         # get all channel data but only return required
-        nMaxSamples = c_int32()
-        ps.ps5000aMemorySegments(self.chandle, self.nEnabledChannels(), byref(nMaxSamples))
+        if check:
+            nMaxSamples = c_long()
+            ps.ps5000aMemorySegments(self.chandle, 1, byref(nMaxSamples))
+            nMaxSamples.value = math.floor(nMaxSamples.value/self.nEnabledChannels())
+            if self.maxSamples > nMaxSamples.value:
+                raise Exception("samples will be larger than memory")
 
-        if self.maxSamples > nMaxSamples.value:
-            raise Exception("samples will be larger than memory")
+            self.status["getTimebase2"] = ps.ps5000aGetTimebase2(self.chandle, \
+                self.timebase, self.maxSamples, byref(self.timeInternalns),\
+                None, 0)
+            assert_pico_ok(self.status["getTimebase2"])
 
         preTriggerSamples = 100
         self.status["runBlock"] = ps.ps5000aRunBlock(self.chandle, \
             preTriggerSamples, self.maxSamples, self.timebase, None, 0, None, None)
         assert_pico_ok(self.status["runBlock"])
 
-        self.status["getTimebase2"] = ps.ps5000aGetTimebase2(self.chandle, \
-            self.timebase, self.maxSamples, byref(self.timeInternalns),\
-            None, 0)
-        assert_pico_ok(self.status["getTimebase2"])
-        self.t = np.linspace(0, (self.maxSamples-1)*self.timeInternalns.value/1e9, self.maxSamples)
-
         ready = c_int16(0)
         check = c_int16(0)
         while ready.value == check.value:
             self.status["isReady"] = ps.ps5000aIsReady(self.chandle, byref(ready))
+            time.sleep(1e-3)
 
         for key in self.chs:
             if self.chs[key].enabled:
@@ -246,6 +245,7 @@ class picoscope:
                 self.status["setDataBuffer"+key] = ps.ps5000aSetDataBuffer(self.chandle, \
                     self.chs[key].channel, byref(self.chs[key].buffer), self.maxSamples, 0, 0)
                 assert_pico_ok(self.status["setDataBufferA"])
+
 
         overflow = c_int16()
         cmaxSamples = c_uint32(self.maxSamples)
@@ -259,10 +259,9 @@ class picoscope:
 
         for key in self.chs:
             if self.chs[key].enabled:
-                self.chs[key].timeSignal = adc2mV(self.chs[key].buffer, \
-                    self.chs[key].range, maxADC)
-                self.chs[key].timeSignal = [x * 1e-3 for x in self.chs[key].timeSignal]
-                self.chs[key].timeSignal = np.array(self.chs[key].timeSignal)
+                self.chs[key].timeSignal = (np.array(self.chs[key].buffer) / maxADC.value) * \
+                    self.psVoltageRange[self.chs[key].range] * 1e-3
+
         if channel is not None:
             return self.chs[channel].timeSignal
 
@@ -277,6 +276,24 @@ class picoscope:
                 n = n + 1
         return n
 
+    def clearMem(self):
+        self.f = None
+        self.t = None
+        for channel in ['A', 'B', 'C', 'D']:
+            self.chs[channel].clearMem()
+
+    def getData(self, range = None):
+        if not range:
+            range = [0, len(self.chs['A'].timeSignal)]
+        return np.stack((self.chs['A'].timeSignal[range[0]:range[1]], \
+            self.chs['B'].timeSignal[range[0]:range[1]], \
+            self.chs['C'].timeSignal[range[0]:range[1]]), 1)
+
+    def getfs(self):
+        return 1e9/self.timeInternalns.value
+
+    def getfreq(self):
+        return self.f
 
 def main(argv):
     flag = 0
