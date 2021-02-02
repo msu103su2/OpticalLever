@@ -41,6 +41,14 @@ class ch:
 
     def clearMem(self):
         self.timeSignal = None
+    def getConfigureInfo(self):
+        x = {
+            'channel':list(ps.PS5000A_CHANNEL.keys())[list(ps.PS5000A_CHANNEL.values()).index(self.channel)],
+            'range':list(ps.PS5000A_RANGE.keys())[list(ps.PS5000A_RANGE.values()).index(self.range)],
+            'coupling_type':list(ps.PS5000A_COUPLING.keys())[list(ps.PS5000A_COUPLING.values()).index(self.coupling_type)],
+            'enabled':self.enabled
+        }
+        return x
 
 class picoscope:
 
@@ -82,6 +90,11 @@ class picoscope:
         self.chs['C'].range = ps.PS5000A_RANGE["PS5000A_50MV"]
         self.status["setChC"] = self.chs['C'].Enable()
         assert_pico_ok(self.status["setChC"])
+
+        self.chs['D'].coupling_type = ps.PS5000A_COUPLING["PS5000A_AC"]
+        self.chs['D'].range = ps.PS5000A_RANGE["PS5000A_50MV"]
+        self.status["setChD"] = self.chs['D'].Enable()
+        assert_pico_ok(self.status["setChD"])
 
     def configurePSD(self, binWidth, spectrumRange, nTimes = None):
         spectrumRange = spectrumRange * 2
@@ -287,13 +300,27 @@ class picoscope:
             range = [0, len(self.chs['A'].timeSignal)]
         return np.stack((self.chs['A'].timeSignal[range[0]:range[1]], \
             self.chs['B'].timeSignal[range[0]:range[1]], \
-            self.chs['C'].timeSignal[range[0]:range[1]]), 1)
+            self.chs['C'].timeSignal[range[0]:range[1]], \
+            self.chs['D'].timeSignal[range[0]:range[1]]), 1)
 
     def getfs(self):
         return 1e9/self.timeInternalns.value
 
     def getfreq(self):
         return self.f
+
+    def getConfigureInfo(self):
+        re = {
+            'channels':[self.chs['A'].getConfigureInfo(),\
+                        self.chs['B'].getConfigureInfo(),\
+                        self.chs['C'].getConfigureInfo(),\
+                        self.chs['D'].getConfigureInfo()],
+            'resolution':list(ps.PS5000A_DEVICE_RESOLUTION.keys())[list(ps.PS5000A_DEVICE_RESOLUTION.values()).index(self.resolution)],
+            'timebase':self.timebase,
+            'samplingIntervals':{'value':self.timeInternalns.value, 'unit':'ns'},
+            'nSamples':self.maxSamples
+        }
+        return re
 
 def main(argv):
     flag = 0

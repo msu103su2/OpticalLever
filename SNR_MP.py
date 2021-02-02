@@ -12,6 +12,7 @@ import time
 import os
 import multiprocessing as mp
 from multiprocessing.managers import BaseManager
+import json
 
 def PDdualAC_balance(data, fs, dir_filename = None):
     inspectF = 4e5
@@ -66,6 +67,7 @@ def func(lock, pi, idleCores, count, avg, ps5000a, GS, fs, wd, data_cache):
     p_count = 0
     cPowers = []
     indexs = []
+    powers = []
 
     while count.value < avg:
         lock.acquire()
@@ -88,6 +90,7 @@ def func(lock, pi, idleCores, count, avg, ps5000a, GS, fs, wd, data_cache):
                     if p_count == 1:
                         cPowers.append(P)
                         indexs.append(i)
+                        powers.append(np.mean(data[:,3]))
                 else:
                     PSDoverP += newPSD/P
                     PSDoverPP += newPSD/(P*P)
@@ -95,10 +98,12 @@ def func(lock, pi, idleCores, count, avg, ps5000a, GS, fs, wd, data_cache):
                     PSDoverPP_sq +=  np.square(newPSD/(P*P))
                     cPowers.append(P)
                     indexs.append(i)
+                    powers.append(np.mean(data[:,3]))
                 p_count += 1
     data_cache.set(pi, p_count-1, PSDoverP, PSDoverPP, PSDoverP_sq, PSDoverPP_sq)
     data_cache.set_indexs(pi, np.array(indexs))
     data_cache.set_cPowers(pi, np.array(cPowers))
+    data_cache.set_powers(pi, np.array(powers))
     idleCores.put(pi)
 
 class dataCollector():
@@ -110,6 +115,7 @@ class dataCollector():
         self.counts = [0] * num_processes
         self.wd = wd
         self.GS = GS
+        self.powers = [np.array([None])] * num_processes
         self.cPowers = [np.array([None])] * num_processes
         self.indexs = [np.array([None])] * num_processes
 
@@ -159,6 +165,9 @@ class dataCollector():
     def set_cPowers(self, i, data):
         self.cPowers[i] = data
 
+    def set_powers(self, i, data):
+        self.powers[i] = data
+
     def set_indexs(self, i, indexs):
         self.indexs[i] = indexs
 
@@ -171,10 +180,19 @@ class dataCollector():
             temp[self.indexs[i]] = self.cPowers[i]
         return temp[temp != 0]
 
+    def get_powers(self):
+        N = 0
+        for i in range(len(self.indexs)):
+            N = max(N, max(self.indexs[i]))
+        temp = np.zeros(N+1)
+        for i in range(len(self.powers)):
+            temp[self.indexs[i]] = self.powers[i]
+        return temp[temp != 0]
+
 if __name__ == '__main__':
-    avg = 5000
+    avg = 4000
     steps = 30
-    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\48-SNR'
+    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\50-SNR'
     rpip = '192.168.137.14'
     BaseManager.register('picoscope', ps.picoscope)
     BaseManager.register('dataCollector', dataCollector)
@@ -196,58 +214,67 @@ if __name__ == '__main__':
     ps5000a.AC('A')
     ps5000a.AC('B')
     ps5000a.DC('C')
+    ps5000a.DC('D')
 
     ps5000a.AutoRange('A')
     ps5000a.AutoRange('B')
     ps5000a.AutoRange('C')
+    ps5000a.ChangeRangeTo('D', 10000)
     ps5000a.configurePSD(8.515, 4e6)
 
     wd = wd+'\\'
     if not os.path.exists(wd):
         os.makedirs(wd)
 
+    need_balance = True
+    move_mirrors = True
+    Axs = [0]*steps
+    Bxs = [0]*steps
+    GSs = [0]*steps
+
     for j in range(steps):
-        # split mirror balancing process
-        ps5000a.DC('A')
-        ps5000a.DC('B')
-        ps5000a.AutoRange('A')
-        ps5000a.AutoRange('B')
-
-        ps5000a.getTimeSignal();
-        data = ps5000a.getData()
-        data = data[:,0] - data[:,1]
-        unbalance = np.mean(data)
-        std = np.std(data)
-
-        flag = True
-        if abs(unbalance)>0.5:
-            step = 0.005
-        else:
-            step = 0.002
-
-        while abs(unbalance)>0.3*std:
-            if unbalance>0:
-                if flag:
-                    DS.B.MoveBy(-step)
-                else:
-                    DS.A.MoveBy(step)
-            else:
-                if not flag:
-                    DS.B.MoveBy(step)
-                else:
-                    DS.A.MoveBy(-step)
+        if need_balance:
+            # split mirror balancing process
+            ps5000a.DC('A')
+            ps5000a.DC('B')
             ps5000a.AutoRange('A')
             ps5000a.AutoRange('B')
+
             ps5000a.getTimeSignal();
             data = ps5000a.getData()
-            diff = data[:,0] - data[:,1]
-            newUnbalance = np.mean(diff)
-            std = np.std(diff)
-            print(DS.getQuasi_gapsize(),' ',newUnbalance)
-            print(np.mean(data[:,0]),' ',np.mean(data[:,1]), ' ',np.mean(data[:,2]))
-            if newUnbalance*unbalance<0:
-                flag = not flag
-            unbalance = newUnbalance
+            data = data[:,0] - data[:,1]
+            unbalance = np.mean(data)
+            std = np.std(data)
+
+            flag = True
+            if abs(unbalance)>0.5:
+                step = 0.005
+            else:
+                step = 0.002
+
+            while abs(unbalance)>0.3*std:
+                if unbalance>0:
+                    if flag:
+                        DS.B.MoveBy(-step)
+                    else:
+                        DS.A.MoveBy(step)
+                else:
+                    if not flag:
+                        DS.B.MoveBy(step)
+                    else:
+                        DS.A.MoveBy(-step)
+                ps5000a.AutoRange('A')
+                ps5000a.AutoRange('B')
+                ps5000a.getTimeSignal();
+                data = ps5000a.getData()
+                diff = data[:,0] - data[:,1]
+                newUnbalance = np.mean(diff)
+                std = np.std(diff)
+                print(DS.getQuasi_gapsize(),' ',newUnbalance)
+                print(np.mean(data[:,0]),' ',np.mean(data[:,1]), ' ',np.mean(data[:,2]))
+                if newUnbalance*unbalance<0:
+                    flag = not flag
+                unbalance = newUnbalance
 
         ps5000a.ChangeRangeTo('A', 100)
         ps5000a.ChangeRangeTo('B', 100)
@@ -277,13 +304,41 @@ if __name__ == '__main__':
         cPowers = data_cache.get_cPowers()
         filename = 'cPower_GS='+str(GS)
         cPowers.tofile(wd+filename+'.bin', sep = '')
+        cPowers = data_cache.get_powers()
+        filename = 'power_GS='+str(GS)
+        cPowers.tofile(wd+filename+'.bin', sep = '')
+
+        Axs[j] = DS.A.x
+        Bxs[j] = DS.B.x
+        GSs[j] = GS
         print(time.time()-start)
         print((j+1)/steps*100)
-        DS.OpenGapBy(0.05)
+        if move_mirrors:
+            DS.OpenGapBy(0.05)
 
     ps5000a.PSDfromTS(ps5000a.getTimeSignal('A'), ps5000a.getfs())
     nprows = np.array(ps5000a.getfreq())
     filename = 'PSDfreq'
     nprows.tofile(wd+filename+'.bin', sep = '')
+
+    comment = 'Quasi_gapsizes are in order with mirror A and B positions, and is in time order'
+    MirrorA = {
+        'angle':{'value':DS.Aangle, 'unit':'radians'},
+        'positions':{'value':Axs, 'unit':'mm'}
+        }
+    MirrorB = {
+        'angle':{'value':DS.Bangle, 'unit':'radians'},
+        'positions':{'value':Bxs, 'unit':'mm'}
+        }
+    header = {
+        'MirrorA':MirrorA,
+        'MirrorB':MirrorB,
+        'Mirror_tilt_angle':{'value':DS.tiltAngle, 'unit':'radians'},
+        'picoscopeInfo':ps5000a.getConfigureInfo(),
+        'Quasi_gapsizes':GSs,
+        'comment':comment
+        }
+    with open(wd+'info.json','w') as file:
+        json.dump(header, file)
     DS.A.MoveTo(Ax)
     DS.B.MoveTo(Bx)
