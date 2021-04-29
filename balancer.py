@@ -9,8 +9,10 @@ import os
 
 if __name__ == '__main__':
     steps = 1
-    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\00-test'
-    DS = sp.splitPair()
+    safeRangeA = [-1, 9.5]
+    safeRangeB = [-1, 9.5]
+    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\76-BeamWaists'
+    DS = sp.splitPair(safeRangeA , safeRangeB)
 
     Ax = DS.A.Position();
     Bx = DS.B.Position();
@@ -32,11 +34,12 @@ if __name__ == '__main__':
         ps5000a.DC('B')
         ps5000a.AutoRange('A')
         ps5000a.AutoRange('B')
+        sign = -1
 
         ps5000a.getTimeSignal();
         data = ps5000a.getData()
-        data = data[:,0] - data[:,1]
-        unbalance = np.mean(data)
+        data = data[:,0] #- data[:,1]
+        unbalance = sign*np.mean(data)
         std = np.std(data)
 
         flag = True
@@ -60,7 +63,7 @@ if __name__ == '__main__':
             ps5000a.AutoRange('B')
             ps5000a.getTimeSignal();
             data = ps5000a.getData()
-            diff = data[:,0] - data[:,1]
+            diff = sign*data[:,0] #- data[:,1]
             newUnbalance = np.mean(diff)
             std = np.std(diff)
             print(DS.getQuasi_gapsize(),' ',newUnbalance)

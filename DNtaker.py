@@ -53,8 +53,8 @@ class dataCollector():
         self.PSDs[i] = data
 
 if __name__ == '__main__':
-    avg = 100
-    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\31-test'
+    avg = 1000
+    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\63-DN'
     BaseManager.register('picoscope', ps.picoscope)
     BaseManager.register('dataCollector', dataCollector)
     BM = BaseManager()

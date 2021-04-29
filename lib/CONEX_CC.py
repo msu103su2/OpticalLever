@@ -9,12 +9,13 @@ Tracking = ['1TS000046']
 class CONEX_CC:
     """docstring for CONEX_CC."""
 
-    def __init__(self, deviceKey, reset = True):
+    def __init__(self, deviceKey, safeRange, reset = True):
         self.rm = pyvisa.ResourceManager()
         self.inst = self.rm.open_resource(deviceKey, baud_rate = 921600,\
             data_bits = 8, write_termination = '\r\n', read_termination = '\r\n',\
             timeout = 2000)
         self.min_step = 0.0001
+        self.safeRange = safeRange #in unit of mm, [min, max]
 
         if self.inst.query('1TS') not in ReadyT:
             reset = True
@@ -46,19 +47,28 @@ class CONEX_CC:
 
     def MoveTo(self, position):
         self.WaitForReady()
-        self.inst.write('1PA'+str(position))
-        while not self.WaitForReady():
+        if position > self.safeRange[0] and position < self.safeRange[1]:
             self.inst.write('1PA'+str(position))
-        self.x = self.Position()
+            while not self.WaitForReady():
+                self.inst.write('1PA'+str(position))
+            self.x = self.Position()
+        else:
+            print('Warning! Mirrors might crash, out of safe range')
 
-    def ErrorHandler(self):
+    def ErrorHandler(self, move_direction = None):
         state = self.inst.query('1TS')
+        print(state)
         if state in Disable+DisableT:
             self.inst.write('1MM1')
         elif state in Tracking:
-            self.inst.write('1ST')
+            if move_direction == None:
+                self.inst.write('1ST')
+            else:
+                self.inst.write('1PR'+str(move_direction*0.01))
+        state = self.inst.query('1TS')
+        print('Error handled, current state:{state:s}'.format(state = state))
 
-    def WaitForReady(self):
+    def WaitForReady(self, move_direction = None):
         waitTime = 0;
         queryInterval = 1;#in unit of sec
         JobDone = True
@@ -66,16 +76,23 @@ class CONEX_CC:
             time.sleep(queryInterval)
             waitTime += queryInterval
             if waitTime > 10:
-                self.ErrorHandler()
+                self.ErrorHandler(move_direction = move_direction)
                 JobDone = False
                 break
         return JobDone
 
     def MoveBy(self, displacement):
-        self.WaitForReady()
-        self.inst.write('1PR'+str(displacement))
-        self.WaitForReady()
-        self.x = self.Position()
+        target = self.x + displacement
+        if target > self.safeRange[0] and target < self.safeRange[1]:
+            self.WaitForReady()
+            self.inst.write('1PR'+str(displacement))
+            if displacement > 0:
+                self.WaitForReady(move_direction = 1)
+            else:
+                self.WaitForReady(move_direction = -1)
+            self.x = self.Position()
+        else:
+            print('Warning! Mirrors might crash, out of safe range')
 
     def close(self):
         self.inst.close()

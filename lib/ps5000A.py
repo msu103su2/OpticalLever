@@ -2,7 +2,7 @@ import sys, argparse
 import os
 import numpy as np
 from picosdk.ps5000a import ps5000a as ps
-from picosdk.functions import assert_pico_ok, adc2mV
+from picosdk.functions import assert_pico_ok, mV2adc
 from ctypes import cdll, c_long, c_ulong, c_uint32, byref, \
 create_string_buffer, c_bool, c_char_p, c_int, c_int16, c_int32,\
 c_double, sizeof, c_voidp, c_float
@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import csv
 import time
 import math
+import re
 
 class ch:
 
@@ -24,6 +25,7 @@ class ch:
         self.device_handle = device_handle
         self.buffer = None
         self.timeSignal = None
+        self.overflow = False
 
     def Enable(self):
         self.enabled = True
@@ -41,6 +43,15 @@ class ch:
 
     def clearMem(self):
         self.timeSignal = None
+
+    def getRange(self):
+        s = list(ps.PS5000A_RANGE.keys())[list(ps.PS5000A_RANGE.values()).index(self.range)]
+        result = re.findall("PS5000A_([0-9]+)([A-Z]+)", s)
+        range = int(result[0][0])
+        if result[0][1] == 'V':
+            range = int(range*1e3)
+        return range
+
     def getConfigureInfo(self):
         x = {
             'channel':list(ps.PS5000A_CHANNEL.keys())[list(ps.PS5000A_CHANNEL.values()).index(self.channel)],
@@ -110,7 +121,7 @@ class picoscope:
         requiredMeasureTime = 1 / binWidth
         self.maxSamples = ceil(requiredMeasureTime *1e9 / self.timeInternalns.value)
 
-        assert self.timeInternalns.value < requiredSamplingInterval * 1e9
+        assert self.timeInternalns.value <= requiredSamplingInterval * 1e9
 
         if bool(nTimes):
             nMaxSamples = c_long()
@@ -160,12 +171,6 @@ class picoscope:
         nprows = np.array(rows)
         nprows.tofile(self.workingDirectory+filename+'.bin', sep = '')
 
-    def plot(self, channel):
-        plt.plot(self.memory[0],self.memory[1])
-        plt.xlabel('f(Hz)')
-        plt.ylabel('Power(dBm)')
-        plt.show()
-
     def close(self):
         self.status["stop"] = ps.ps5000aStop(self.chandle)
         assert_pico_ok(self.status["stop"])
@@ -177,11 +182,8 @@ class picoscope:
         orginalMaxSamples = self.maxSamples
         self.maxSamples = 10000
         while self.chs[channel].range < max(self.psVoltageRange.keys()):
-            overrange = False
-            timeSignal = self.getTimeSignal(channel)
-            if max(map(abs, timeSignal)) > 0.95* self.psVoltageRange[self.chs[channel].range]/1000:
-                overrange = True
-            if overrange:
+            self.getTimeSignal(reportOverflow = False)
+            if self.chs[channel].overflow:
                 self.chs[channel].range += 1
                 self.status["setCh"+channel] = self.chs[channel].set()
                 assert_pico_ok(self.status["setCh"+channel])
@@ -193,18 +195,15 @@ class picoscope:
             self.chs[channel].range = self.chs[channel].range - 1
             self.status["setCh"+channel] = self.chs[channel].set()
             assert_pico_ok(self.status["setCh"+channel])
-            timeSignal = self.getTimeSignal(channel)
+            timeSignal = self.getTimeSignal(channel, reportOverflow = False)
             if max(map(abs, timeSignal)) < 0.95* self.psVoltageRange[self.chs[channel].range]/1000:
                 toosmall = True
-            if toosmall:
-                self.chs[channel].range = self.chs[channel].range - 1
             else:
                 self.chs[channel].range = self.chs[channel].range + 1
                 self.status["setCh"+channel] = self.chs[channel].set()
                 assert_pico_ok(self.status["setCh"+channel])
                 break
         self.maxSamples = orginalMaxSamples
-        self.chs[channel].clearMem()
 
     def ChangeRangeTo(self, channel, Range):
         keys = list(self.psVoltageRange.keys())
@@ -227,7 +226,7 @@ class picoscope:
         self.status["setCh"+channel] = self.chs[channel].set()
         assert_pico_ok(self.status["setCh"+channel])
 
-    def getTimeSignal(self, channel = None, check = True):
+    def getTimeSignal(self, channel = None, check = True, trigger = None, triggerThreshold = 0, reportOverflow = True):
         # get all channel data but only return required
         if check:
             nMaxSamples = c_long()
@@ -241,7 +240,12 @@ class picoscope:
                 None, 0)
             assert_pico_ok(self.status["getTimebase2"])
 
-        preTriggerSamples = 100
+        if trigger is not None:
+            source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_{trigCh}".format(trigCh = trigger)]
+            self.status["trigger"] = ps.ps5000aSetSimpleTrigger(self.chandle, 1, source, triggerThreshold, 2, 0, 0)
+            assert_pico_ok(self.status["trigger"])
+
+        preTriggerSamples = 0
         self.status["runBlock"] = ps.ps5000aRunBlock(self.chandle, \
             preTriggerSamples, self.maxSamples, self.timebase, None, 0, None, None)
         assert_pico_ok(self.status["runBlock"])
@@ -257,7 +261,7 @@ class picoscope:
                 self.chs[key].buffer = (c_int16 * self.maxSamples)()
                 self.status["setDataBuffer"+key] = ps.ps5000aSetDataBuffer(self.chandle, \
                     self.chs[key].channel, byref(self.chs[key].buffer), self.maxSamples, 0, 0)
-                assert_pico_ok(self.status["setDataBufferA"])
+                assert_pico_ok(self.status["setDataBuffer"+key])
 
 
         overflow = c_int16()
@@ -265,6 +269,18 @@ class picoscope:
         self.status["getValues"] = ps.ps5000aGetValues(self.chandle, 0 , \
         byref(cmaxSamples), 0, 0, 0, byref(overflow))
         assert_pico_ok(self.status["getValues"])
+
+        overflow = '{0:04b}'.format(overflow.value)
+        chOF = [bool(int(i)) for i in overflow]
+        self.chs['A'].overflow = chOF[-1]
+        self.chs['B'].overflow = chOF[-2]
+        self.chs['C'].overflow = chOF[-3]
+        self.chs['D'].overflow = chOF[-4]
+        channels = ['A','B','C','D']
+        if reportOverflow:
+            for i in range(4):
+                if chOF[-(i+1)]:
+                    print('channel {0} overflow'.format(channels[i]))
 
         maxADC = c_int16()
         self.status["maximumValue"] = ps.ps5000aMaximumValue(self.chandle, byref(maxADC))
@@ -321,6 +337,13 @@ class picoscope:
             'nSamples':self.maxSamples
         }
         return re
+
+    def AWG_clock(self):
+        f = 10e6
+        self.status["SetSigGenBuiltInV2"] = ps.ps5000aSetSigGenBuiltInV2(\
+            self.chandle, c_int32(0), c_uint32(int(1e6)), 1, f, f,\
+            0, 0, 0, 0, c_uint32(0), c_uint32(0), 0, 0, c_int16(0))
+        assert_pico_ok(self.status["SetSigGenBuiltInV2"])
 
 def main(argv):
     flag = 0

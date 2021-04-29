@@ -9,6 +9,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy import signal
 import time
+import datetime
 import os
 import multiprocessing as mp
 from multiprocessing.managers import BaseManager
@@ -190,20 +191,26 @@ class dataCollector():
         return temp[temp != 0]
 
 if __name__ == '__main__':
-    avg = 4000
-    steps = 30
-    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\50-SNR'
+    startTime = datetime.datetime.now()
+    avg =3000
+    steps = 60
+    need_balance = True
+    move_mirrors = True
+    wd = r'Z:\data\optical lever project\NORCADA_NX53515C\68-SNR'
     rpip = '192.168.137.14'
     BaseManager.register('picoscope', ps.picoscope)
     BaseManager.register('dataCollector', dataCollector)
     BM = BaseManager()
     BM.start()
 
+    safeRangeA = [-1, 8.7]
+    safeRangeB = [-1, 3.72]
+
     rm = py.ResourceManager()
     FG = FuncGen.FuncGen()
     #NA = AG.AgilentNA(wd)
     #RP = scpi.scpi(rpip)
-    DS = sp.splitPair()
+    DS = sp.splitPair(safeRangeA , safeRangeB)
     #zx80 = Switch.zx80(RP)
 
     Ax = DS.A.Position();
@@ -226,8 +233,6 @@ if __name__ == '__main__':
     if not os.path.exists(wd):
         os.makedirs(wd)
 
-    need_balance = True
-    move_mirrors = True
     Axs = [0]*steps
     Bxs = [0]*steps
     GSs = [0]*steps
@@ -321,6 +326,8 @@ if __name__ == '__main__':
     filename = 'PSDfreq'
     nprows.tofile(wd+filename+'.bin', sep = '')
 
+    endTime = datetime.datetime.now()
+
     comment = 'Quasi_gapsizes are in order with mirror A and B positions, and is in time order'
     MirrorA = {
         'angle':{'value':DS.Aangle, 'unit':'radians'},
@@ -336,6 +343,8 @@ if __name__ == '__main__':
         'Mirror_tilt_angle':{'value':DS.tiltAngle, 'unit':'radians'},
         'picoscopeInfo':ps5000a.getConfigureInfo(),
         'Quasi_gapsizes':GSs,
+        'startTime':startTime.isoformat(),
+        'endTime':endTime.isoformat(),
         'comment':comment
         }
     with open(wd+'info.json','w') as file:
