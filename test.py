@@ -1231,7 +1231,7 @@ plt.show()
 
 fc = 269296
 ps5000a.configurePSD(1, int(1953125/5))
-freqs = np.linspace(fc-5, fc+5, 11)
+freqs = np.linspace(fc-10, fc+10, 11)
 lowcut = fc-1e3
 highcut = fc+1e3
 fs = ps5000a.getfs()

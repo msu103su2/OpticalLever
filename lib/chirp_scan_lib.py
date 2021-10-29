@@ -1111,49 +1111,6 @@ def max_in_fft_debug(avg, ps5000a, fc, refch):
 
     return np.mean(complexA), np.mean(complexB), np.mean(complexC), fftC
 
-def process_fft(zs, fftBs, fftCs):
-    cpy_fftCs = [[]]*len(fftCs)
-    for i in range(len(fftCs)):
-        cpy_fftCs[i] = fftCs[i].copy()
-
-    cpy_fftBs = [[]]*len(fftBs)
-    for i in range(len(fftBs)):
-        cpy_fftBs[i] = fftBs[i].copy()
-
-    index = [500, 1500]
-    for i in range(len(cpy_fftCs)):
-        bavg = np.mean(cpy_fftBs[i][index[0]:index[1]])
-        cpy_fftCs[i][index[0]:index[1]] = np.divide(cpy_fftCs[i][index[0]:index[1]], cpy_fftBs[i][index[0]:index[1]])*bavg
-
-    complexC = np.zeros(len(cpy_fftCs), dtype = np.complex)
-    for i in range(len(cpy_fftCs)):
-        maxI = np.argmax(np.absolute(cpy_fftCs[i]))
-        indexarra = np.array(list(range(index[0], maxI - 100)) + list(range(maxI + 100, index[1])))
-        temp = cpy_fftCs[i]
-        complexC[i] = np.mean(temp[indexarra])
-
-    for i in range(len(cpy_fftCs)):
-        cpy_fftCs[i] = cpy_fftCs[i]/complexC[0]*np.absolute(complexC[0])
-
-    complexC = np.zeros(len(cpy_fftCs), dtype = np.complex)
-    for i in range(len(cpy_fftCs)):
-        maxI = np.argmax(np.absolute(cpy_fftCs[i]))
-        indexarra = np.array(list(range(index[0], maxI - 100)) + list(range(maxI + 100, index[1])))
-        temp = cpy_fftCs[i]
-        complexC[i] = np.mean(temp[indexarra])
-
-    bnd = ((-0.01, 0.01), (np.min(np.absolute(complexC))*0.5, np.min(np.absolute(complexC))*2), (0, 25), (-6.283185307179586, 6.283185307179586), (-6.283185307179586, 6.283185307179586))
-    x0 = [5e-04, np.min(np.absolute(complexC)), 15, 0, 0.2]
-    res = minimize(cost, x0, args = (zs,  np.absolute(complexC), np.angle(complexC)), bounds = bnd, method = 'Powell', tol = 1e-7)
-    A, B, z0, phi0, phi1 = res.x
-    temp = complexC.copy()
-    complexC = complexC - B*np.complex(np.cos(phi0+phi1), np.sin(phi0+phi1))
-    for i in range(len(cpy_fftCs)):
-        cpy_fftCs[i] = cpy_fftCs[i] - B*np.complex(np.cos(phi0+phi1), np.sin(phi0+phi1))
-
-    dict_re = {'zs':zs, 'fftBs':fftBs, 'fftCs':fftCs, 'processed_C':cpy_fftCs, 'fit':res, 'complexC':temp, 'processed_complexC':complexC}
-    return dict_re
-
 def cost(x, *arg):
     A, B, z0, phi0, phi1 = x
     z, amp, angle = arg
@@ -1212,12 +1169,11 @@ def process_signal_fft(zs, fftBs, fftCs, idxs):
         bavg = np.mean(cpy_fftBs[i][index[0]:index[1]])
         cpy_fftCs[i][index[0]:index[1]] = np.divide(cpy_fftCs[i][index[0]:index[1]], cpy_fftBs[i][index[0]:index[1]])*bavg
 
-    complexC = np.zeros(len(cpy_fftCs), dtype = np.complex)
-    for i in range(len(cpy_fftCs)):
-        maxI = np.argmax(np.absolute(fftCs[i]))
-        indexarra = np.array(list(range(index[0], maxI - 100)) + list(range(maxI + 100, index[1])))
-        temp = cpy_fftCs[i]
-        complexC[i] = np.mean(temp[indexarra])
+    complexC = np.zeros(len(cpy_fftBs), dtype = np.complex)
+    for i in range(len(cpy_fftBs)):
+        indexarra = np.array(list(range(index[0], index[1])))
+        temp = cpy_fftBs[i]
+        complexC[i] = np.mean(cpy_fftBs[indexarra])
 
     for i in range(len(cpy_fftCs)):
         cpy_fftCs[i] = cpy_fftCs[i]/complexC[0]*np.absolute(complexC[0])
