@@ -1,6 +1,7 @@
 import pyvisa
 import time
 import re
+import numpy as np
 ReadyT = ['1TS000036','1TS000037','1TS000038']
 Ready = ['1TS000032','1TS000033','1TS000034']
 Disable = ['1TS00003D']
@@ -52,6 +53,16 @@ class CONEX_CC:
             while not self.WaitForReady():
                 self.inst.write('1PA'+str(position))
             self.x = self.Position()
+        else:
+            print('Warning! Mirrors might crash, out of safe range')
+
+    def Quasi_MoveTo(self, position):
+        self.WaitForReady()
+        if position > self.safeRange[0] and position < self.safeRange[1]:
+            while np.absolute(self.Position() - position) > 1:
+                self.MoveBy(-np.sign(self.Position() - position))
+                self.WaitForReady()
+            self.MoveBy(-(self.Position() - position))
         else:
             print('Warning! Mirrors might crash, out of safe range')
 

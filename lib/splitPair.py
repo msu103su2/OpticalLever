@@ -37,92 +37,6 @@ class splitPair:
         self.Quasi_gapsize = np.cos(self.tiltAngle)*abs(self.A.x*np.sin(self.Aangle) +\
             self.B.x*np.sin(self.Bangle))
 
-    def CaliAngleA(self, stepscale):
-        input("Caution! Calibration need split D mirror pair to be far aprat!\
-         \n Press Enter to continue...")
-        x0 = self.A.x
-        rows = np.ndarray((0,2), dtype = float)
-        tempPicoHandle = ps.picoscope()
-        tempPicoHandle.defaultSetting()
-        tempPicoHandle.DC()
-        tempPicoHandle.AutoRange()
-
-        allCaptured = False
-        while not allCaptured:
-            self.A.MoveBy(stepscale*self.A.min_step)
-            tempPicoHandle.AutoRange()
-            p = np.mean(tempPicoHandle.getTimeSignal())
-            rows = np.append(rows,[[self.A.x, p]], axis = 0)
-            print(rows[-1])
-            middleP = (rows[:,1].min()+rows[:,1].max())/2
-            if (len(rows) > 10):
-                if(abs(rows[-1,1] - rows[-10,1])/rows[-1,1] < 0.01 \
-                    and abs(rows[-1,1]-2*middleP)/(2*middleP) < 0.05 ):
-                    allCaptured = True
-            else:
-                allCaptured = False
-        rows[:,0] = rows[:,0]/1000
-        middleP = (rows[:,1].min()+rows[:,1].max())/2
-        middleIndex = np.argmin(abs(rows[:,1]-middleP))
-        middleX = rows[middleIndex,0]
-        stepsToCenter = len(rows[:,1]) - middleIndex
-        cutIndex = max(middleIndex - stepsToCenter,0)
-        x = rows[cutIndex:,0]
-        P = rows[cutIndex:,1]
-        popt= curve_fit(func, x, P , p0 =[middleX, 75/180*np.pi, 2*middleP, self.tiltAngle], \
-            bounds = ([0,0,0,self.tiltAngle*(1-1e-3)],[25,np.pi,3*middleP,self.tiltAngle*(1+1e-3)]))
-        plt.plot(x, P, 'b-', label='data')
-        plt.plot(x, func(x, *popt[0]),'g--', label='fit')
-        plt.show()
-        self.centerXinA = popt[0][0]
-        self.Aangle = popt[0][1]
-        print(self.Aangle*180/np.pi)
-        self.A.MoveTo(x0)
-        tempPicoHandle.close()
-
-    def CaliAngleB(self, stepscale):
-        input("Caution! Calibration need split D mirror pair to be far aprat!\
-         \n Press Enter to continue...")
-        x0 = self.B.x
-        rows = np.ndarray((0,2), dtype = float)
-        tempPicoHandle = ps.picoscope()
-        tempPicoHandle.defaultSetting()
-        tempPicoHandle.DC()
-        tempPicoHandle.AutoRange()
-
-        allCaptured = False
-        while not allCaptured:
-            self.B.MoveBy(stepscale*self.B.min_step)
-            tempPicoHandle.AutoRange()
-            p = -np.mean(tempPicoHandle.getTimeSignal())
-            rows = np.append(rows,[[self.B.x, p]], axis = 0)
-            print(rows[-1])
-            middleP = (rows[:,1].min()+rows[:,1].max())/2
-            if (len(rows) > 10):
-                if(abs(rows[-1,1] - rows[-10,1])/rows[-1,1] < 0.01 \
-                    and abs(rows[-1,1]-2*middleP)/(2*middleP) < 0.05 ):
-                    allCaptured = True
-            else:
-                allCaptured = False
-        rows[:,0] = rows[:,0]/1000
-        middleP = (rows[:,1].min()+rows[:,1].max())/2
-        middleIndex = np.argmin(abs(rows[:,1]-middleP))
-        middleX = rows[middleIndex,0]
-        stepsToCenter = len(rows[:,1]) - middleIndex
-        cutIndex = max(middleIndex - stepsToCenter,0)
-        x = rows[cutIndex:,0]
-        P = rows[cutIndex:,1]
-        popt= curve_fit(func, x, P , p0 =[middleX, 66/180*np.pi, 2*middleP, self.tiltAngle], \
-            bounds = ([0,0,0,self.tiltAngle*(1-1e-3)],[25,np.pi,3*middleP,self.tiltAngle*(1+1e-3)]))
-        plt.plot(x, P, 'b-', label='data')
-        plt.plot(x, func(x, *popt[0]),'g--', label='fit')
-        plt.show()
-        self.centerXinB = popt[0][0]
-        self.Bangle = popt[0][1]
-        print(self.Bangle*180/np.pi)
-        self.B.MoveTo(x0)
-        tempPicoHandle.close()
-
     def close(self):
         self.A.close()
         self.B.close()
@@ -220,11 +134,11 @@ class splitPair:
     def RawCali(self, mirror, ps5000a, stepscale, dir_filename, endpoint = None, direction = 1):
         if mirror == 'A':
             tg = self.A
-            channel = 'C'
+            channel = 'A'
             angle = self.Aangle
         elif mirror =='B':
             tg = self.B
-            channel = 'C'
+            channel = 'A'
             angle = self.Bangle
         x0 = tg.x
         rows = np.ndarray((0,2), dtype = float)
@@ -241,7 +155,7 @@ class splitPair:
                 ps5000a.AutoRange(channel)
                 p = np.mean(ps5000a.getTimeSignal(channel))
                 rows = np.append(rows,[[tg.x, p]], axis = 0)
-                #print(rows[-1])
+                print(rows[-1])
                 middleP = (rows[:,1].min()+rows[:,1].max())/2
                 if (len(rows) > 10):
                     if(abs(rows[-1,1] - rows[-10,1])/rows[-1,1] < 0.01 \
@@ -257,7 +171,7 @@ class splitPair:
                 ps5000a.AutoRange(channel)
                 p = np.mean(ps5000a.getTimeSignal(channel))
                 rows = np.append(rows,[[tg.x, p]], axis = 0)
-                #print(rows[-1])
+                print(rows[-1])
                 middleP = (rows[:,1].min()+rows[:,1].max())/2
                 if (tg.x < endpoint and direction == 1 or tg.x > endpoint and direction == -1):
                     allCaptured = False
@@ -272,6 +186,9 @@ class splitPair:
         cutIndex = max(middleIndex - 3*stepsToCenter,0)
         x = rows[cutIndex:,0]
         P = rows[cutIndex:,1]
+        if middleP < 0:
+            P = -P
+            middleP = -middleP
         popt, pcov = curve_fit(fitFunc, np.array(x), np.array(P) , p0 =[middleX, np.pi/2, 2*middleP, 0, 1e-3, 0], \
             bounds = ([middleX*0.9, np.pi/2*0.999, 2*middleP*0.9, 0, 0, -0.012],\
             [middleX*1.1, np.pi/2*1.001, 2*middleP*1.1, 0.001, 0.1, 0.012]))

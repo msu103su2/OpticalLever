@@ -13,6 +13,7 @@ import csv
 import time
 import math
 import re
+import lib.mathlib_shan as ms
 
 class ch:
 
@@ -25,6 +26,7 @@ class ch:
         self.device_handle = device_handle
         self.buffer = None
         self.timeSignal = None
+        self.psd = None
         self.overflow = False
 
     def Enable(self):
@@ -63,12 +65,12 @@ class ch:
 
 class picoscope:
 
-    def __init__(self, workingDirectory = r'D:\temp'):
+    def __init__(self, workingDirectory = r'D:\temp', SN = 'GX150/0053'):
         self.chandle = c_int16()
         self.status = {}
         self.resolution = ps.PS5000A_DEVICE_RESOLUTION["PS5000A_DR_14BIT"]
         self.status["openunit"] = ps.ps5000aOpenUnit(byref(self.chandle), \
-            None, self.resolution)
+            SN.encode('utf-8'), self.resolution)
         assert_pico_ok(self.status["openunit"])
         self.chs = {'A':ch('A', self.chandle), 'B':ch('B', self.chandle),\
             'C':ch('C', self.chandle), 'D':ch('D', self.chandle)}
@@ -179,8 +181,6 @@ class picoscope:
         assert_pico_ok(self.status["close"])
 
     def AutoRange(self, channel):
-        orginalMaxSamples = self.maxSamples
-        self.maxSamples = 10000
         while self.chs[channel].range < max(self.psVoltageRange.keys()):
             self.getTimeSignal(reportOverflow = False)
             if self.chs[channel].overflow:
@@ -203,7 +203,6 @@ class picoscope:
                 self.status["setCh"+channel] = self.chs[channel].set()
                 assert_pico_ok(self.status["setCh"+channel])
                 break
-        self.maxSamples = orginalMaxSamples
 
     def ChangeRangeTo(self, channel, Range):
         keys = list(self.psVoltageRange.keys())
@@ -243,6 +242,10 @@ class picoscope:
         if trigger is not None:
             source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_{trigCh}".format(trigCh = trigger)]
             self.status["trigger"] = ps.ps5000aSetSimpleTrigger(self.chandle, 1, source, triggerThreshold, 2, 0, 0)
+            assert_pico_ok(self.status["trigger"])
+        else:
+            source = ps.PS5000A_CHANNEL["PS5000A_CHANNEL_{trigCh}".format(trigCh = 'D')]
+            self.status["trigger"] = ps.ps5000aSetSimpleTrigger(self.chandle, 0, source, triggerThreshold, 2, 0, 0)
             assert_pico_ok(self.status["trigger"])
 
         preTriggerSamples = 0
@@ -294,6 +297,31 @@ class picoscope:
         if channel is not None:
             return self.chs[channel].timeSignal
 
+    def getPSD(self, ch, avg = 1, trigger = None, offset = 0, triggerThreshold = 0):
+        for i in range(avg):
+            self.getTimeSignal(trigger = trigger, triggerThreshold = triggerThreshold)
+            if i == 0:
+                psd = ms.Single_sided_PSD(self.chs[ch].timeSignal[0:offset], self.getfs())
+            else:
+                psd = psd + ms.Single_sided_PSD(self.chs[ch].timeSignal[0:offset], self.getfs())
+        psd = psd / avg
+        #self.PSDfromTS(self.chs[ch].timeSignal[0:offset], self.getfs())
+        return 10*np.log10(20*psd)
+
+    def getPSD_timeAvg(self, ch, avg = 1, trigger = None, offset = 0):
+        self.getTimeSignal(trigger = trigger)
+        ts = self.chs[ch].timeSignal[0:offset]
+        psd_poweravg = ms.Single_sided_PSD(self.chs[ch].timeSignal[0:offset], self.getfs())
+        for i in range(avg - 1):
+            self.getTimeSignal(trigger = trigger)
+            ts = ts + self.chs[ch].timeSignal[0:offset]
+            psd_poweravg = psd_poweravg + ms.Single_sided_PSD(self.chs[ch].timeSignal[0:offset], self.getfs())
+        ts= ts / avg
+        psd_poweravg = psd_poweravg / avg
+        psd = ms.Single_sided_PSD(ts, self.getfs())
+        #self.PSDfromTS(self.chs[ch].timeSignal[0:offset], self.getfs())
+        return 10*np.log10(20*psd), 10*np.log10(20*psd_poweravg)
+
     def timeSignalStable(self, channel):
         S = self.timeSignal(channel)
         return (np.std(S) < 0.01 * np.mean(S) )
@@ -325,6 +353,9 @@ class picoscope:
     def getfreq(self):
         return self.f
 
+    def getT(self):
+        return self.maxSamples/self.getfs()
+
     def getConfigureInfo(self):
         re = {
             'channels':[self.chs['A'].getConfigureInfo(),\
@@ -344,6 +375,29 @@ class picoscope:
             self.chandle, c_int32(0), c_uint32(int(1e6)), 1, f, f,\
             0, 0, 0, 0, c_uint32(0), c_uint32(0), 0, 0, c_int16(0))
         assert_pico_ok(self.status["SetSigGenBuiltInV2"])
+
+    def LPF20M(self, ch, On):
+        if On:
+            self.status["SetBWlimiter"] = ps.ps5000aSetBandwidthFilter(\
+                self.chandle, self.chs[ch].channel, c_int32(1))
+        else:
+            self.status["SetBWlimiter"] = ps.ps5000aSetBandwidthFilter(\
+                self.chandle, self.chs[ch].channel, c_int32(0))
+        assert_pico_ok(self.status["SetBWlimiter"])
+
+    def SigGenDC(self, Vdc):
+        wavetype = c_int32(3)#DC
+        self.status["setSigGenBuiltInV2"] = \
+            ps.ps5000aSetSigGenBuiltInV2(self.chandle, \
+            int(Vdc*1e6), 0, wavetype, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        assert_pico_ok(self.status["setSigGenBuiltInV2"])
+
+    def Plot(self, ch, offset = 0):
+        if offset is not 0:
+            plt.plot(self.chs[ch].timeSignal[0:offset])
+        else:
+            plt.plot(self.chs[ch].timeSignal)
+        plt.show()
 
 def main(argv):
     flag = 0

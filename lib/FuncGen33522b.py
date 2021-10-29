@@ -16,22 +16,27 @@ class FuncGen:
     def Noise(self, freq, amp, offset = 0, ch = 1):
         self.inst.write('SOUR'+str(ch)+'APPL:NOIS '+str(freq)+','+str(amp)+','+str(offset))
 
-    def chirp(self, arbname, fstart, fend, fs, N, Vmax, Vmin):
+    def chirp(self, arbname, fstart, fend, fs, N, Vmax, Vmin, phi = 0):
         t = np.array(list(range(int(N))))/fs
-        data = chirp(t, fstart, t[-1], fend, method='linear', phi = 0)
+        data = chirp(t, fstart, t[-1], fend, method='linear', phi = phi)
         data = (data+1)/2*(Vmax- Vmin)+Vmin
         self.arb(data, fs, arbname)
 
-    def chirps(self, arbname, fstarts, fends, fs, N, Vmaxs, Vmins):
+    def chirps(self, arbname, fstarts, fends, fs, N, Vmaxs, Vmins, phis = None, ch = 1):
         t = np.array(list(range(int(N))))/fs
         data = np.zeros(int(N))
-        for f1, f2, Vmax, Vmin in zip(fstarts, fends, Vmaxs, Vmins):
-            temp = chirp(t, f1, t[-1], f2, method='linear', phi = 0)
-            temp = (temp+1)/2*(Vmax- Vmin)+Vmin
+        if phis is None:
+            phis = [0]*len(fstarts)
+        for f1, f2, Vmax, Vmin, phi in zip(fstarts, fends, Vmaxs, Vmins, phis):
+            temp = chirp(t, f1, t[-1], f2, method='linear', phi = phi)
+            temp = (temp+1)/2*(Vmax- Vmin)-(Vmax-Vmin)/2
             data = data + temp
-        self.arb(data, fs, arbname)
+        data = data + (Vmaxs[0]+Vmins[0])/2
+        return self.arb(data, fs, arbname, ch = ch)
 
-    def sweep(self, fstart, fend, sweep_time, amp = 0.25, dc = 0.365, hold_time = 0, return_time = 0, function = 'SIN'):
+    def sweep(self, fstart, fend, sweep_time, amp = 0.25, dc = 0.365, \
+                hold_time = 0, return_time = 0, function = 'SIN', \
+                trigger = False, triggerF = 0):
         self.inst.write('OUTPUT1 OFF')
         self.inst.write('SOUR1:FUNC {f:s}'.format(f = function))
         self.inst.write('SOUR1:FREQ {f:f}'.format(f = fstart))
@@ -53,9 +58,9 @@ class FuncGen:
             V = V + amplitude*np.sin(2*np.pi*freq*x)
         return V, fs
 
-    def arb(self, data, fs, arbname):
+    def arb(self, data, fs, arbname, ch = 1):
         #data in voltages
-        self.inst.write('OUTPUT1 OFF')
+        self.inst.write('OUTPUT{:d} OFF'.format(ch))
         self.inst.write('DATA:VOL:CLE')
         self.inst.write('FORM:BORD SWAP')
 
@@ -69,19 +74,33 @@ class FuncGen:
         data = data.tolist()
 
         del self.inst.timeout
-        self.inst.write_binary_values('SOUR1:DATA:ARB1:DAC {arbname},'.format(arbname = arbname), data, datatype = 'h')
+        self.inst.write_binary_values('SOUR{ch:d}:DATA:ARB1:DAC {arbname},'.format(arbname = arbname, ch = ch), data, datatype = 'h')
         self.inst.write('*WAI')
-        self.inst.write('SOUR1:FUNC:ARB {arbname}'.format(arbname = arbname))
-        self.inst.write('SOUR1:FUNC:ARB:SRAT {fs:d}'.format(fs = int(fs)))
-        self.inst.write('SOUR1:VOLT {amp:f}'.format(amp = amp))
-        self.inst.write('SOUR1:VOLT:OFFSET {offset:f}'.format(offset = offset))
-        self.inst.write('SOUR1:FUNC:ARB:FILT NORM')
-        self.inst.write('SOUR1:FUNC ARB')
-        self.inst.write('OUTPUT1 ON')
+        self.inst.write('SOUR{ch:d}:FUNC:ARB {arbname}'.format(arbname = arbname, ch = ch))
+        self.inst.write('SOUR{ch:d}:FUNC:ARB:SRAT {fs:d}'.format(fs = int(fs), ch = ch))
+        self.inst.write('SOUR{ch:d}:VOLT {amp:f}'.format(amp = amp, ch = ch))
+        self.inst.write('SOUR{ch:d}:VOLT:OFFSET {offset:f}'.format(offset = offset, ch = ch))
+        self.inst.write('SOUR{ch:d}:FUNC:ARB:FILT NORM'.format(ch = ch))
+        self.inst.write('SOUR{ch:d}:FUNC ARB'.format(ch = ch))
+        self.inst.write('OUTPUT{ch:d} ON'.format(ch = ch))
         self.inst.timeout = 2e3
+        return data
 
     def sync(self):
         self.inst.write('OUTP:SYNC ON')
+
+    def phi(self, degree, ch = 2):
+        self.inst.write('SOUR{ch:d}:PHAS {phi:f}'.format(ch = ch, phi = degree))
+
+    def DC(self, dc, ch = 1):
+        self.inst.write('SOUR'+str(ch)+':APPL:DC DEF, DEF, {dc:.3f} V'.format(dc = dc))
+
+    def sweep_trigger(self, fstart, fend, markerF, ch = 1):
+        self.inst.write('SOUR1:FREQ:STAR {:f}'.format(fstart))
+        self.inst.write('SOUR1:FREQ:STOP {:f}'.format(fend))
+        self.inst.write('MARKer:FREQuency {:f}'.format(markerF))
+        self.inst.write('TRIGger1:SOURce IMM')
+
 
 def Ndigits(number):
     count = 0

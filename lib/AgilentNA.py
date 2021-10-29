@@ -11,7 +11,7 @@ from datetime import date
 class AgilentNA:
 
     def __init__(self, workingDirectory = r'D:\temp'):
-        self.rm = pyvisa.ResourceManager()
+        self.rm = pyvisa.ResourceManager('C:\\Program Files (x86)\\IVI Foundation\\VISA\\WinNT\\agvisa\\agbin\\visa32.dll')
         self.inst = self.rm.open_resource('GPIB1::17::INSTR')
         self.inst.write_termination = '\r'
         self.inst.timeout = 20000
