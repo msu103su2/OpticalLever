@@ -959,6 +959,38 @@ def max_in_psd(avg, ps5000a, fc):
     HC = np.max(psdC[idx[0]:idx[1]])
     return HA, HB, HC
 
+def maxs_in_psd(avg, ps5000a, fcs):
+    fstarts = np.array(fcs) - 200
+    fends = np.array(fcs) + 200
+    ps5000a.getTimeSignal()
+    ps5000a.PSDfromTS(ps5000a.chs['A'].timeSignal, ps5000a.getfs())
+    HAs = np.zeros(len(fcs))
+    HBs = np.zeros(len(fcs))
+    HCs = np.zeros(len(fcs))
+    idx0s = np.zeros(len(fcs), dtype = int)
+    idx1s = np.zeros(len(fcs), dtype = int)
+    for i in range(len(fcs)):
+        idx0s[i] = np.argmin(np.absolute(ps5000a.f-fstarts[i]))
+        idx1s[i] = np.argmin(np.absolute(ps5000a.f-fends[i]))
+    for i in range(avg):
+        ps5000a.getTimeSignal()
+        if i == 0:
+            psdA = ms.Single_sided_PSD(ps5000a.chs['A'].timeSignal, ps5000a.getfs())
+            psdB = ms.Single_sided_PSD(ps5000a.chs['B'].timeSignal, ps5000a.getfs())
+            psdC = ms.Single_sided_PSD(ps5000a.chs['C'].timeSignal, ps5000a.getfs())
+        else:
+            psdA = psdA + ms.Single_sided_PSD(ps5000a.chs['A'].timeSignal, ps5000a.getfs())
+            psdB = psdB + ms.Single_sided_PSD(ps5000a.chs['B'].timeSignal, ps5000a.getfs())
+            psdC = psdC + ms.Single_sided_PSD(ps5000a.chs['C'].timeSignal, ps5000a.getfs())
+    psdA = psdA / avg
+    psdB = psdB / avg
+    psdC = psdC / avg
+    for i in range(len(fcs)):
+        HAs[i] = np.max(psdA[idx0s[i]:idx1s[i]])
+        HBs[i] = np.max(psdB[idx0s[i]:idx1s[i]])
+        HCs[i] = np.max(psdC[idx0s[i]:idx1s[i]])
+    return HAs, HBs, HCs
+
 def T_search(fc, UC8, ps5000a, axis_x, axis_y, alpha):
     p_last = T_search_cost(ps5000a, fc)
     dx = 20
@@ -1165,15 +1197,11 @@ def process_signal_fft(zs, fftBs, fftCs, idxs):
         cpy_fftBs[i] = fftBs[i].copy()
 
     index = [int(len(fftCs[0])/2 - 500), int(len(fftCs[0])/2 + 500)]
+    complexC = np.zeros(len(cpy_fftBs), dtype = np.complex)
     for i in range(len(cpy_fftCs)):
         bavg = np.mean(cpy_fftBs[i][index[0]:index[1]])
+        complexC[i] = bavg
         cpy_fftCs[i][index[0]:index[1]] = np.divide(cpy_fftCs[i][index[0]:index[1]], cpy_fftBs[i][index[0]:index[1]])*bavg
-
-    complexC = np.zeros(len(cpy_fftBs), dtype = np.complex)
-    for i in range(len(cpy_fftBs)):
-        indexarra = np.array(list(range(index[0], index[1])))
-        temp = cpy_fftBs[i]
-        complexC[i] = np.mean(cpy_fftBs[indexarra])
 
     for i in range(len(cpy_fftCs)):
         cpy_fftCs[i] = cpy_fftCs[i]/complexC[0]*np.absolute(complexC[0])
@@ -1355,7 +1383,7 @@ def PID(setPoint, kp, ki, kd, fc, ps5000a, monitorTime = None):
             if t[-1] > monitorTime:
                 InRange = 10
         i = i + 1
-        print(et[-1], DC)
+        print(et[-1], ps[-1], DC)
     plt.plot(t, et)
     plt.show()
     return t, et, DCs, ps

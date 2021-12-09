@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.signal import butter, lfilter
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 
 def Single_sided_fft(timeSignal, window = None):
     N = len(timeSignal)
@@ -61,5 +63,19 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
+def fit_logLorentzian(x, y, p0, plot = 1):
+    popt, pcov = curve_fit(fitFunc, x, y, p0 =p0)
+    if plot:
+        plt.plot(x, y)
+        plt.plot(x, fitFunc(np.array(x), *popt))
+        plt.show()
+    return popt, pcov
+
 def fitFunc(x, y, fm, offset, Noi, A):
+    x = np.array(x, dtype = np.float)
+    y = np.float(y)
+    fm = np.float(fm)
+    offset = np.float(offset)
+    Noi = np.float(Noi)
+    A = np.float(A)
     return offset + 10*np.log10(Noi + A/(np.power((fm**2 - np.power(x, 2)), 2)*(2*np.pi)**4+np.power((2*np.pi*x*y),2)))

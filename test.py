@@ -1229,29 +1229,7 @@ plt.legend(loc='upper left')
 
 plt.show()
 
-fc = 269296
-ps5000a.configurePSD(1, int(1953125/5))
-freqs = np.linspace(fc-10, fc+10, 11)
-lowcut = fc-1e3
-highcut = fc+1e3
-fs = ps5000a.getfs()
-angles = []
-amps = []
-for f in freqs:
-    FG.Sine(f, 100e-3, ch = 2)
-    time.sleep(3)
-    ps5000a.getTimeSignal()
-    amp, angle = CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, \
-        ps5000a.chs['B'].timeSignal, ps5000a.getfs(), f)
-    angles = angles + [angle]
-    amps = amps + [amp]
 
-#angles = (np.array(angles) - angles[0]+1)%(2*np.pi)
-fig, ax1 = plt.subplots()
-ax1.plot(freqs, angles)
-ax2 = ax1.twinx()
-ax2.plot(freqs, amps)
-plt.show()
 
 ps5000a = ps.picoscope()
 ps5000a.defaultSetting()
@@ -1592,7 +1570,6 @@ for i in range(len(datas)):
         ref = datas[i]['fftBs'][j]
         complexCs = complexCs + [np.mean(ref[idx[0]:idx[1]])]
     datas[i]['complexCs_raw'] = complexCs
-
     for i in range(len(datas)):
         complexC = datas[i]['complexCs_raw']
         zs = datas[i]['zs']
@@ -1646,3 +1623,66 @@ temp = 10*np.log10(20) + 10*np.log10(np.square(np.absolute(signals[400][5000:150
 plt.plot(f, temp)
 plt.ylabel('Power(dBm)')
 plt.xlabel('f-fm(Hz)')
+
+ax = gca()
+fig, ax= plt.subplots()
+ax.plot(np.real(complexC), np.imag(complexC),'*')
+plt.ticklabel_format(axis="x", style="sci", scilimits=(0,0))
+plt.ticklabel_format(axis="y", style="sci", scilimits=(0,0))
+plt.xlabel('Re{classical noise}')
+plt.ylabel('Im{classical noise}')
+ax.axhline(y=0, color='k')
+ax.axvline(x=0, color='k')
+plt.show()
+
+avg = 100
+for i in range(avg):
+    ps5000a.getTimeSignal()
+    ref = ms.Single_sided_PSD(ps5000a.chs['B'].timeSignal, ps5000a.getfs())
+    sig = ms.Single_sided_PSD(ps5000a.chs['C'].timeSignal, ps5000a.getfs())
+    temp = np.divide(sig, ref)
+    if i == 0:
+        signal = temp
+    else:
+        signal = signal + temp
+signal = signal/avg
+signal = 10*np.log10(signal)
+
+
+fc = 269172
+ps5000a.configurePSD(10, int(1953125/5))
+freqs = np.linspace(fc-10, fc+10, 11)
+lowcut = fc-1e3
+highcut = fc+1e3
+fs = ps5000a.getfs()
+angles = []
+amps = []
+for f in freqs:
+    FG.Sine(f, 40e-3, ch = 2)
+    time.sleep(3)
+    ps5000a.getTimeSignal()
+    amp, angle = CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, \
+        ps5000a.chs['B'].timeSignal, ps5000a.getfs(), f)
+    angles = angles + [angle]
+    amps = amps + [amp]
+
+#angles = (np.array(angles) - angles[0]+1)%(2*np.pi)
+fig, ax1 = plt.subplots()
+ax1.plot(freqs, angles, 'r')
+ax2 = ax1.twinx()
+ax2.plot(freqs, amps, 'b')
+plt.show()
+
+fc = 218500
+FG.Sine(fc,40e-3, ch = 2)
+time.sleep(3)
+ps5000a.getTimeSignal()
+CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, ps5000a.chs['B'].timeSignal, ps5000a.getfs(), fc)
+
+ps5000a.configurePSD(10, int(1953125/5))
+t, et, DCs, ps = CH.PID(0, 0.01, 0.003, 0.003, fc, ps5000a, 30)
+
+def report():
+    HA, HB, HC = CH.max_in_psd(5, ps5000a, fc)
+    to_report = 10*np.log10(20)+10*np.log10(HC)
+    print(to_report)
