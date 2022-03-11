@@ -66,8 +66,9 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 def fit_logLorentzian(x, y, p0, plot = 1):
     popt, pcov = curve_fit(fitFunc, x, y, p0 =p0)
     if plot:
-        plt.plot(x, y)
-        plt.plot(x, fitFunc(np.array(x), *popt))
+        plt.plot(x, y, '.')
+        fitx = np.linspace(x[0], x[-1], len(x)*10)
+        plt.plot(fitx, fitFunc(np.array(fitx), *popt))
         plt.show()
     return popt, pcov
 
@@ -79,3 +80,30 @@ def fitFunc(x, y, fm, offset, Noi, A):
     Noi = np.float(Noi)
     A = np.float(A)
     return offset + 10*np.log10(Noi + A/(np.power((fm**2 - np.power(x, 2)), 2)*(2*np.pi)**4+np.power((2*np.pi*x*y),2)))
+
+def Exclude_data(xdata, ydata, i0s, i1s):
+    x = (np.array(xdata)).copy()
+    y = (np.array(ydata)).copy()
+    for i in range(len(i0s)):
+        x[i0s[i]:i1s[i]] = np.zeros(i1s[i] - i0s[i])
+    y = y[np.nonzero(x)]
+    x = x[np.nonzero(x)]
+    return x, y
+
+def Approximate_index(x, value):
+    x = np.array(x)
+    return np.argmin(np.absolute(x - value))
+
+def angle_of_two_vector(a, b):
+    #a is the reference vector, angle is between -pi and pi
+    theta = np.arccos(np.inner(a, b)/np.sqrt(np.inner(a,a)*np.inner(b,b)))
+    diff = np.array(b) - np.array(a)
+    if np.cross(b, a) > 0:
+        return theta
+    else:
+        return -theta
+
+def angle_diff(angleA, angleB):
+    a = [np.cos(angleA), np.sin(angleA)]
+    b = [np.cos(angleB), np.sin(angleB)]
+    return angle_of_two_vector(a, b)

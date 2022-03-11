@@ -112,6 +112,8 @@ class picoscope:
     def configurePSD(self, binWidth, spectrumRange, nTimes = None):
         spectrumRange = spectrumRange * 2
         requiredSamplingInterval = 1 / spectrumRange
+        requiredMeasureTime = 1 / binWidth
+        self.maxSamples = ceil(requiredMeasureTime / requiredSamplingInterval)
         self.timebase = floor(requiredSamplingInterval * 125000000 + 2) #14bit
         #self.timebase = floor(requiredSamplingInterval * 62500000 + 3) #16bit
 
@@ -120,7 +122,6 @@ class picoscope:
             None, 0)
         assert_pico_ok(self.status["getTimebase2"])
 
-        requiredMeasureTime = 1 / binWidth
         self.maxSamples = ceil(requiredMeasureTime *1e9 / self.timeInternalns.value)
 
         assert self.timeInternalns.value <= requiredSamplingInterval * 1e9
@@ -321,6 +322,36 @@ class picoscope:
         psd = ms.Single_sided_PSD(ts, self.getfs())
         #self.PSDfromTS(self.chs[ch].timeSignal[0:offset], self.getfs())
         return 10*np.log10(20*psd), 10*np.log10(20*psd_poweravg)
+
+    def getPSD_trig(self, ch, avg, trigger = 'D', triggerThreshold = 8000, debug = False, refch = None):
+        for iter in range(avg):
+            self.getTimeSignal(trigger = trigger, triggerThreshold = triggerThreshold)
+            TSidx = [0]
+            i = 0
+            while i < len(self.chs['D'].timeSignal) - 6:
+                if self.chs['D'].timeSignal[i+4] - self.chs['D'].timeSignal[i] > 3:
+                    temp = np.array(self.chs['D'].timeSignal[i:i+5])
+                    for j in range(len(temp)):
+                        if temp[j] > 3:
+                            break
+                    TSidx = TSidx + [j+i]
+                    i = i + 5
+                else:
+                    i = i + 1
+            if debug:
+                print(TSidx)
+            if iter == 0:
+                if refch  is not None:
+                    psd = np.divide(ms.Single_sided_PSD(self.chs[ch].timeSignal[0:TSidx[1]], self.getfs()), ms.Single_sided_PSD(self.chs[refch].timeSignal[0:TSidx[1]], self.getfs()))
+                else:
+                    psd = ms.Single_sided_PSD(self.chs[ch].timeSignal[0:TSidx[1]], self.getfs())
+            else:
+                if refch  is not None:
+                    newPSD = np.divide(ms.Single_sided_PSD(self.chs[ch].timeSignal[0:TSidx[1]], self.getfs()), ms.Single_sided_PSD(self.chs[refch].timeSignal[0:TSidx[1]], self.getfs()))
+                else:
+                    newPSD = ms.Single_sided_PSD(self.chs[ch].timeSignal[0:TSidx[1]], self.getfs())
+                psd = psd + newPSD[:len(psd)]
+        return 10*np.log10(20) + 10*np.log10(psd/avg)
 
     def timeSignalStable(self, channel):
         S = self.timeSignal(channel)

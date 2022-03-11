@@ -13,7 +13,7 @@ from Newport.AgilisCmdLib import *
 import lib.chirp_scan_lib as CH
 nT = int(39063235/5)
 
-wd = r'Z:\data\optical lever project\NORCADA_NX53515C\138-LineScan'
+wd = r'Z:\data\optical lever project\NORCADA_NX53515C\manuscript_data'
 ps5000a = ps.picoscope()
 FG = FuncGen.FuncGen()
 # initialize AG-UC2
@@ -1081,12 +1081,12 @@ plt.plot(np.angle(test - residule))
 plt.plot(np.real((test - residule)/(test[0] - residule)))
 
 fcs = [fc]
-fstarts = (np.array(fcs) - 50).tolist()
-fends = (np.array(fcs) + 50).tolist()
+fstarts = (np.array(fcs) - 150).tolist()
+fends = (np.array(fcs) + 150).tolist()
 fs = int(1e6)
 N = int(1e7)
-Vmaxs = [0.2]*len(fcs)
-Vmins = [-0.2]*len(fcs)
+Vmaxs = [1]*len(fcs)
+Vmins = [-1]*len(fcs)
 
 zs0 = [0.1, 5, 10, 12, 13, 14, 15, 18]
 zs1 = [4.99999078,9.99997919,11.9999781,12.9999687,13.9999593,14.5998404,14.6998236,14.799789,14.8997721,14.999773,14.9998614,16.4398592,16.4998562,16.5598531,16.6198501,16.6798471,17.9998332]
@@ -1357,28 +1357,6 @@ signals = temp.copy()
 del temp
 xs = xs[idxs]
 
-for i in range(len(xs)):
-    plt.plot(10*np.log10(np.square(np.absolute(signals[i]))))
-    plt.pause(0.1)
-
-for i in range(10):
-    complexC = datas[i]['complexC']
-    zs = datas[i]['zs']
-    A0 = (np.absolute(complexC[0]) - np.absolute(complexC[1])) / (zs[0] - zs[1])
-    B0 = np.min(np.absolute(complexC))
-    bnd = ((A0*1.1, A0*0.9), (-0.01, 0.01), (0, 25), (np.angle(complexC[0]) -0.2, np.angle(complexC[0]) +0.2), (0, 6.283185307179586))
-    x0 = [A0, B0, 15, 0, 0.2]
-    res = CH.minimize(CH.cost_complex_test, x0, args = (zs,  complexC), bounds = bnd, method = 'Powell', tol = 1e-7)
-    z = np.linspace(zs[0], zs[-1], 1000)
-    complexC_fit = CH.fit_complex_test(z, *res.x)
-    fig, ax1 = plt.subplots()
-    ax1.plot(zs, np.real(complexC), '*')
-    ax1.plot(z, np.real(complexC_fit))
-    ax2 = ax1.twinx()
-    ax2.plot(zs, np.imag(complexC), 'o')
-    ax2.plot(z, np.imag(complexC_fit))
-    plt.show()
-
 idx = [500, 1500]
 for i in range(len(datas)):
     complexCs = []
@@ -1635,30 +1613,17 @@ ax.axhline(y=0, color='k')
 ax.axvline(x=0, color='k')
 plt.show()
 
-avg = 100
-for i in range(avg):
-    ps5000a.getTimeSignal()
-    ref = ms.Single_sided_PSD(ps5000a.chs['B'].timeSignal, ps5000a.getfs())
-    sig = ms.Single_sided_PSD(ps5000a.chs['C'].timeSignal, ps5000a.getfs())
-    temp = np.divide(sig, ref)
-    if i == 0:
-        signal = temp
-    else:
-        signal = signal + temp
-signal = signal/avg
-signal = 10*np.log10(signal)
 
-
-fc = 269172
+fc = 120823
 ps5000a.configurePSD(10, int(1953125/5))
-freqs = np.linspace(fc-10, fc+10, 11)
+freqs = np.linspace(fc-5, fc+5, 11)
 lowcut = fc-1e3
 highcut = fc+1e3
 fs = ps5000a.getfs()
 angles = []
 amps = []
 for f in freqs:
-    FG.Sine(f, 40e-3, ch = 2)
+    FG.Sine(f, 10e-3, ch = 2)
     time.sleep(3)
     ps5000a.getTimeSignal()
     amp, angle = CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, \
@@ -1668,21 +1633,521 @@ for f in freqs:
 
 #angles = (np.array(angles) - angles[0]+1)%(2*np.pi)
 fig, ax1 = plt.subplots()
-ax1.plot(freqs, angles, 'r')
+ax1.plot(freqs, angles, 'r.')
 ax2 = ax1.twinx()
-ax2.plot(freqs, amps, 'b')
+ax2.plot(freqs, amps, 'b.')
 plt.show()
 
-fc = 218500
-FG.Sine(fc,40e-3, ch = 2)
+ps5000a.configurePSD(10, int(1953125/5))
+t, et, DCs, ps = CH.PID(-2.4, -0.01, -0.001, -0.01, fc, ps5000a, 30)
+
+fc = 120823
+FG.Sine(fc,15e-3, ch = 2)
 time.sleep(3)
 ps5000a.getTimeSignal()
 CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, ps5000a.chs['B'].timeSignal, ps5000a.getfs(), fc)
 
 ps5000a.configurePSD(10, int(1953125/5))
+t, et, DCs, ps = CH.PID(0, -0.01, -0.005, -0.005, fc, ps5000a, 3600)
 t, et, DCs, ps = CH.PID(0, 0.01, 0.003, 0.003, fc, ps5000a, 30)
-
+ps5000a.configurePSD(1, int(1953125/5))
 def report():
     HA, HB, HC = CH.max_in_psd(5, ps5000a, fc)
     to_report = 10*np.log10(20)+10*np.log10(HC)
     print(to_report)
+
+def costfunc(popt, *arg):
+    xdata, ydata = arg
+    return np.sqrt(np.sum(np.square(ydata - ms.fitFunc(xdata, *popt)))/len(xdata))
+
+bnd = ((0,5), (320890-5, 320890+5), (0, 300), (0, 0.01), (10,300))
+specfit = {'1_10':{'x':xdata.tolist(), 'y':ydata.tolist(), 'popt':res.x.tolist(), 'cost':res.fun}}
+
+fc = 320874.7
+mode = '1_12'
+
+FG.Sine(fc, 200e-3, ch = 1)
+time.sleep(3)
+ps5000a.configurePSD(1, int(1953125/5))
+CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = False, rel = 2)
+ps5000a.configurePSD(0.1, int(1953125/5))
+psd = ps5000a.getPSD('C', avg = 5, offset = -1)
+
+f0 = fc - 750
+f1 = fc + 750
+i0 = int(f0*10)
+i1 = int(f1*10)
+
+ydata = psd[i0:i1]
+xdata = range(i0, i1)
+xdata = np.array(list(xdata))/10
+
+specfit[mode] = {}
+specfit[mode]['x'] = xdata.tolist()
+specfit[mode]['y'] = ydata.tolist()
+
+for key in specfit:
+    t0 = specfit[key]['t0']
+    t1 = specfit[key]['t1']
+    p0 = specfit[key]['p0']
+    p1 = specfit[key]['p1']
+    specfit[key]['gamma'] = np.log(10)*(p1-p0)/(10*(t1-t0))
+
+key = '1_12'
+i0s = [ms.Approximate_index(specfit[key]['x'], 320520), ms.Approximate_index(specfit[key]['x'], 320691)]
+i1s = [ms.Approximate_index(specfit[key]['x'], 320561), ms.Approximate_index(specfit[key]['x'], 320728)]
+specfit[key]['x_filtered'], specfit[key]['y_filtered'] = ms.Exclude_data(specfit[key]['x'], specfit[key]['y'], i0s, i1s)
+
+key = '1_2'
+specfit[key]['x_filtered'] = specfit[key]['x']
+specfit[key]['y_filtered'] = specfit[key]['y']
+
+for key in specfit:
+    if key=='1_8':
+        continue
+    x = specfit[key]['x_filtered']
+    y = specfit[key]['y_filtered']
+    p0[1] = x[np.argmax(y)]
+    p0[0] = -specfit[key]['gamma']
+    bnd = ((0, p0[0]*5), (p0[1]-5, p0[1]+5), (0, 300), (0, 1e-6), (10, 300))
+    res = minimize(costfunc, p0, args = (x, y), bounds = bnd, method = 'Nelder-Mead', tol = 1e-7, options = {'maxiter':100000, 'maxfev':100000})
+    specfit[key]['fitx'] = (res.x).tolist()
+    specfit[key]['fitcost'] = res.fun
+
+for key in specfit:
+    if key=='1_8':
+        continue
+    print(key)
+    print(specfit[key]['fitcost'])
+    print(specfit[key]['fitx'])
+
+key = '1_2'
+x = specfit[key]['x_filtered']
+y = specfit[key]['y_filtered']
+p0[1] = x[np.argmax(y)]
+p0[0] = -specfit[key]['gamma']
+bnd = ((0, p0[0]*5), (p0[1]-5, p0[1]+5), (0, 300), (0, 1e-6), (10, 300))
+res = minimize(costfunc, p0, args = (x, y), bounds = bnd, method = 'Nelder-Mead', tol = 1e-7, options = {'maxiter':100000, 'maxfev':100000})
+plt.plot(x, y, '.')
+plt.plot(x, ms.fitFunc(x, *res.x))
+plt.show()
+
+for key in specfit:
+    if key=='1_8':
+        continue
+    x = specfit[key]['x_filtered']
+    y = specfit[key]['y_filtered']
+    fitx = specfit[key]['fitx']
+    xdense = np.linspace(fitx[1]-1, fitx[1]+1, 1001)
+    xfit = np.sort(x + xdense.tolist())
+    print(key)
+    print(fitx[0])
+    plt.plot(x, y, '.')
+    plt.plot(xfit, ms.fitFunc(xfit, *fitx))
+    plt.show()
+
+'{:f}, {:f}, {:f}, {:f}'.format(np.mean(ps5000a.chs['A'].timeSignal), np.mean(ps5000a.chs['B'].timeSignal), np.mean(ps5000a.chs['C'].timeSignal), np.mean(ps5000a.chs['D'].timeSignal))
+
+ps5000a.configurePSD(1, int(1953125/5))
+def try_PID(P, I, D, fc, phase, threshold, rfp, times):
+    freqs = np.linspace(fc-20, fc+20, 11)
+    lowcut = fc-1e3
+    highcut = fc+1e3
+    fs = ps5000a.getfs()
+    t=0
+    et=0
+    DCs = 0
+    ps= 0
+    for f in freqs:
+        FG.Sine(f, rfp, ch = 2)
+        time.sleep(3)
+        ps5000a.getTimeSignal()
+        amp, angle = CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, \
+            ps5000a.chs['B'].timeSignal, ps5000a.getfs(), f)
+        print(f, amp, angle)
+        if amp > threshold:
+            t, et, DCs, ps = CH.PID(phase, P, I, D, f, ps5000a, times)
+            break
+    return t, et, DCs, ps
+
+ps5000a.configurePSD(1, int(1953125/5*3))
+fcs = [81803, 123872, 172525, 223504, 275648, 328107, 371770]
+fcs = [326445, 376261, 468337, 609922]
+span = 800
+psds = [psd]*len(fcs)
+monitorTime = 3600
+t0 = time.time()
+freqs = [[]]*len(fcs)
+laserPB = []
+laserPD = []
+t = []
+elapsed_time = 0
+ps5000a.getTimeSignal()
+ps5000a.PSDfromTS(ps5000a.chs['C'].timeSignal, ps5000a.getfs())
+idxs = [[]]*len(fcs)
+for i in range(len(fcs)):
+    start = ms.Approximate_index(ps5000a.f, fcs[i] - span/2)
+    end = ms.Approximate_index(ps5000a.f, fcs[i] + span/2)
+    idxs[i] = [start, end]
+
+
+while elapsed_time < monitorTime:
+    ps5000a.getTimeSignal()
+    if ps5000a.chs['A'].overflow is True:
+        CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = 0, rel = 2)
+    psdC = ps5000a.getPSD('C', avg = 5, offset = -1)
+    for fc, i in zip(fcs, range(len(fcs))):
+        freqs[i] = freqs[i] + [fc + np.argmax(psdC[idxs[i][0]:idxs[i][1]])]
+        peak = np.max(psdC[int(fc-span/2): int(fc + span/2)])
+        if  peak > -40 and peak > np.max(psds[i][idxs[i][0]:idxs[i][1]]):
+            psds[i] = psdC
+    laserPB = laserPB + [np.mean(ps5000a.chs['B'].timeSignal)]
+    laserPD = laserPD + [np.mean(ps5000a.chs['D'].timeSignal)]
+    elapsed_time = time.time() - t0
+    t = t + [elapsed_time]
+    print(elapsed_time)
+
+
+monitorTime = 900
+laserPA = []
+laserPB = []
+laserPC = []
+laserPD = []
+t = []
+t0 = time.time()
+elapsed_time = time.time() - t0
+while elapsed_time < monitorTime:
+    ps5000a.getTimeSignal()
+    laserPA = laserPA + [np.mean(ps5000a.chs['A'].timeSignal)]
+    laserPB = laserPB + [np.mean(ps5000a.chs['B'].timeSignal)]
+    laserPC = laserPC + [np.mean(ps5000a.chs['C'].timeSignal)]
+    laserPD = laserPD + [np.mean(ps5000a.chs['D'].timeSignal)]
+    elapsed_time = time.time() - t0
+    t = t + [elapsed_time]
+    aP = (laserPA[-1] - 1.1240649313864077)/1.1240649313864077*100
+    bP = (laserPB[-1] - 3.6695497877200696)/3.6695497877200696*100
+    cP = (laserPC[-1] - 0.2503204888527522)/0.2503204888527522*100
+    dP = (laserPD[-1] - 1.3799933309198555)/1.3799933309198555*100
+    print('t = {:.2f}; [{:.2f}%, {:.2f}%, {:.2f}%, {:.2f}%]'.format(elapsed_time, aP, bP, cP, dP))
+
+monitorTime = 8*3600
+laserPC = []
+laserPD = []
+t = []
+t0 = time.time()
+elapsed_time = time.time() - t0
+while elapsed_time < monitorTime:
+    ps5000a.getTimeSignal()
+    laserPC = laserPC + [np.mean(ps5000a.chs['C'].timeSignal)]
+    laserPD = laserPD + [np.mean(ps5000a.chs['D'].timeSignal)]
+    elapsed_time = time.time() - t0
+    t = t + [elapsed_time]
+    print('t = {:.2f};'.format(elapsed_time))
+
+
+times = [0]*len(laserPC)
+for i in range(len(times)):
+    times[i] = datetime.datetime.fromtimestamp(t0 + t[i])
+
+plt.plot(times, (np.array(laserPA) - np.mean(laserPA))/np.mean(laserPA), label = 'A')
+plt.plot(times, (np.array(laserPB) - np.mean(laserPB))/np.mean(laserPB), label = 'B')
+plt.plot(times, (np.array(laserPC) - np.mean(laserPC))/np.mean(laserPC), label = 'C')
+plt.plot(times, (np.array(laserPD) - np.mean(laserPD))/np.mean(laserPD), label = 'D')
+plt.legend(loc = 'upper left')
+plt.show()
+
+plt.plot((np.array(laserPA) - np.mean(laserPA))/np.mean(laserPA), label = 'A')
+plt.plot((np.array(laserPB) - np.mean(laserPB))/np.mean(laserPB), label = 'B')
+plt.plot((np.array(laserPC) - np.mean(laserPC))/np.mean(laserPC), label = 'C')
+plt.plot((np.array(laserPD) - np.mean(laserPD))/np.mean(laserPD), label = 'D')
+plt.legend(loc = 'upper left')
+plt.show()
+
+end = 2200
+plt.plot((np.array(laserPA[:end]) - np.mean(laserPA[:end]))/np.mean(laserPA[:end]), label = 'A')
+plt.plot((np.array(laserPB[:end]) - np.mean(laserPB[:end]))/np.mean(laserPB[:end]), label = 'B')
+plt.plot((np.array(laserPC[:end]) - np.mean(laserPC[:end]))/np.mean(laserPC[:end])+0.02, label = 'C')
+plt.plot((np.array(laserPD[:end]) - np.mean(laserPD[:end]))/np.mean(laserPD[:end]), label = 'D')
+plt.legend(loc = 'upper left')
+plt.show()
+
+plt.plot(-(np.array(laserPA) - np.mean(laserPA))/np.mean(laserPA)*25)
+plt.plot((np.array(laserPB) - np.mean(laserPB))/np.mean(laserPB)*100)
+plt.plot((np.array(laserPC) - np.mean(laserPC))/np.mean(laserPC)*100)
+plt.plot((np.array(laserPD) - np.mean(laserPD))/np.mean(laserPD)*100)
+
+times = [0]*len(freqs[0])
+for i in range(len(times)):
+    times[i] = datetime.datetime.fromtimestamp(t0 + t[i])
+
+for i in range(len(fcs)):
+    plt.plot(times, (freqs[i]-np.mean(freqs[i]))/np.mean(freqs[i])*1e5+3*i)
+plt.plot(-(np.array(laserP) - np.mean(laserP))/np.mean(laserP)*100)
+
+for i in range(len(fcs)):
+    plt.plot((freqs[i]-np.mean(freqs[i]))/np.mean(freqs[i])*1e5+3*i)
+plt.plot(-(np.array(laserP) - np.mean(laserP))/np.mean(laserP)*100)
+
+for i in range(len(fcs)):
+    plt.plot(psds[i])
+    plt.show()
+
+for i in range(len(fcs)):
+    psds[i].tofile(wd + 'psd_C_to_1_{:d}_01.bin'.format(i), sep = '')
+
+monitorTime = 4*3600
+delay = 0
+setPoint = 3.099942
+refch = 'B'
+sitPoint = 0.7
+t0 = time.time()
+laserP = []
+errs = []
+kp = 0
+ki = 0.5
+kd = 0
+laserPA = []
+laserPB = []
+laserPC = []
+laserPD = []
+t = []
+err = 0
+DC = sitPoint
+elapsedTime = time.time() - t0
+err = sum(ps5000a.getTimeSignal(refch) - setPoint)/len(ps5000a.chs[refch].timeSignal)
+while elapsedTime < monitorTime:
+    ps5000a.getTimeSignal()
+    if elaspedTime > delay:
+        err = err + sum(ps5000a.chs[refch].timeSignal - setPoint)/len(ps5000a.chs[refch].timeSignal)
+        errs = errs + [err]
+        avgsig = np.mean(ps5000a.chs[refch].timeSignal)
+        DC = sitPoint + err*ki + (avgsig - setPoint) * kp
+        if np.abs(DC - sitPoint)>0.4:
+            break
+        else:
+            FG.DC(DC)
+    laserPA = laserPA + [np.mean(ps5000a.chs['A'].timeSignal)]
+    laserPB = laserPB + [np.mean(ps5000a.chs['B'].timeSignal)]
+    laserPC = laserPC + [np.mean(ps5000a.chs['C'].timeSignal)]
+    laserPD = laserPD + [np.mean(ps5000a.chs['D'].timeSignal)]
+    laserP = laserP + [np.mean(ps5000a.chs[refch].timeSignal)]
+    elapsedTime = time.time() - t0
+    t = t + [elapsedTime]
+    print(DC, laserP[-1])
+
+
+ with open('Book1.csv', 'r') as file:
+     reader = csv.reader(file, delimiter = ' ')
+     for row in reader:
+         r = re.findall('([0-9]+:[0-9]+),([0-9]+\.[0-9]+).+,([0-9]+\.[0-9]+)%RH', row[1])
+         T = T + [float(r[0][1])]
+         H = H + [float(r[0][2])]
+         temp = row[0] + ' ' + r[0][0]
+         temp = time.mktime(datetime.datetime.strptime(temp, "%m/%d/%Y %H:%M").timetuple())
+         t = t + [datetime.datetime.fromtimestamp(temp)]
+
+hbar = 1.0545718e-34
+kb = 1.380649e-23
+T = 273.15+24.37
+f = np.linspace(0, len(psd)/50, len(psd))
+C_1 = 10*np.log10(kb*T/(hbar*2*np.pi*f)) - 105
+plt.plot(f, C_1)
+plt.plot(f, psd)
+plt.show()
+
+hbar = 1.0545718e-34
+kb = 1.380649e-23
+T = 273.15+24.37
+f = np.linspace(0, len(sum)/50, len(sum))
+C_1 = 10*np.log10(kb*T/(hbar*2*np.pi*f)) -100
+plt.plot(f, C_1)
+plt.plot(f, sum)
+plt.show()
+
+offset = 60
+plt.plot(psdA)
+plt.plot(psdB + offset)
+plt.plot(psdC + 2*offset)
+plt.plot(psdD + 3*offset)
+plt.show()
+
+
+take = 20
+psds = [[]]*take
+for i in range(take):
+    ps5000a.configurePSD(1, int(1953125/5*3))
+    if ps5000a.chs['A'].overflow is True:
+        CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = 0, rel = 2)
+    ps5000a.configurePSD(0.1, int(1953125/5*3))
+    temp = ps5000a.getPSD('C', avg = 5, offset = -1)
+    psds[i] = temp[idx1:idx2]
+
+
+avg = 50
+sum = []
+for i in range(avg):
+    ps5000a.configurePSD(1, int(1953125/5*3))
+    if ps5000a.chs['A'].overflow is True:
+        CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = 0, rel = 2)
+    ps5000a.configurePSD(0.02, int(1953125/5*3))
+    temp = ps5000a.getPSD('C', avg = 1, offset = -1)
+    if ps5000a.chs['A'].overflow is True:
+        i = i-1
+        continue
+    else:
+        temp = np.power(10, temp/10)
+        if i == 0:
+            sum = temp
+        else:
+            sum = sum + temp
+        print(i)
+
+avg = 20
+sum = []
+i = 0
+count = 0
+while i < avg:
+    ps5000a.configurePSD(1, int(1953125/5*3))
+    if ps5000a.chs['A'].overflow is True:
+        CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = 0, rel = 2)
+    ps5000a.configurePSD(0.02, int(1953125/5*3))
+    temp = ps5000a.getPSD('C', avg = 1, offset = -1)
+    count = count + 1
+    if ps5000a.chs['A'].overflow is True:
+        continue
+    else:
+        temp = np.power(10, temp/10)
+        if i == 0:
+            sum = temp
+        else:
+            sum = sum + temp
+        print(i)
+        i = i+1
+sum = sum/avg
+sum = 10*np.log10(sum)
+
+CH.PID_ver2(-2.4, -0.03, -0.003, -0.004, fc, ps5000a, wd)
+
+ps5000a.configurePSD(0.02, int(1953125/5))
+plt.plot(-(ps5000a.chs['A'].timeSignal - np.mean(ps5000a.chs['A'].timeSignal))/np.mean(ps5000a.chs['A'].timeSignal)+0.05)
+plt.plot((ps5000a.chs['B'].timeSignal - np.mean(ps5000a.chs['B'].timeSignal))/np.mean(ps5000a.chs['B'].timeSignal)+0.05)
+plt.plot((ps5000a.chs['C'].timeSignal - np.mean(ps5000a.chs['C'].timeSignal))/np.mean(ps5000a.chs['C'].timeSignal)+0.1)
+plt.plot((ps5000a.chs['D'].timeSignal - np.mean(ps5000a.chs['D'].timeSignal))/np.mean(ps5000a.chs['D'].timeSignal)+0.15)
+plt.plot((temp - np.mean(temp))/np.mean(temp )+0.1)
+plt.show()
+
+plt.plot(np.linspace(0,1,len(ps5000a.chs['A'].timeSignal)), ps5000a.chs['A'].timeSignal)
+
+fcs = [123763, 130000, 223324, 226000, 275306, 279000, 371437, 374000]
+zs0 = [1, 5, 10, 15]
+CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 4, wd, minzs, fcs)
+
+
+
+
+
+N = len(datas_list)
+relative_z_data_list = [[]]*N
+check_list = [[]]*N
+signals_list = [[]]*N
+relative_z_list = [[]]*N
+p_list = [0]*N
+zs_data_list = [[]]*N
+zs_list = [[]]*N
+check_list = [[]]*N
+check_data_list = [[]]*N
+zs_data_list = [[]]*N
+relative_z_data_list = [[]]*N
+minzs = [0]*N
+
+for i in range(N):
+    relative_z_data_list[i], signals_list[i], relative_z_list[i], _, check_data_list[i], zs_data_list[i], zs_list[i],check_list[i]  = CH.BKAdata(datas_list[i], [1,2,3,4])
+    #ind = np.argmin(relative_z_data_list[i])
+    #zs_data_index = np.argwhere(np.absolute(zs_data_list[i] - zs_data_list[ind]<5))
+    #zs_data = zs_data_list[i][zs_data_index.flatten()]
+    #relative_z_data = relative_z_data_list[i][zs_data_index.flatten()]
+    p = np.polyfit(relative_z_list[i], zs_list[i], 1)
+    minzs[i] = p[1]
+    plt.plot(relative_z_data_list[i], zs_data_list[i], '*')
+    plt.plot(relative_z_list[i], relative_z_list[i]*p[0] + p[1])
+
+iN = 0
+signals = signals_list[iN]
+relative_z_data = relative_z_data_list[iN]
+check_data = check_data_list[iN]
+
+plt.ion()
+figure, ax = plt.subplots(figsize=(10, 8))
+line1, = ax.plot(signals[0])
+for i in range(len(relative_z_data)):
+    line1.set_ydata(signals[i])
+    figure.canvas.draw()
+    figure.canvas.flush_events()
+    #plt.ylim([-20, 20])
+    plt.ylim([-110, -30])
+    time.sleep(0.05)
+
+f = np.linspace(-100, 100, 1000)
+angle  = relative_z_data + np.pi/2
+x,y = np.meshgrid(f,angle)
+z = np.array(signals)
+for i in range(z.shape[0]):
+    z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(relative_z_data[i])))- 10*np.log10(20)
+    #z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(check_data[i])))- 10*np.log10(20)
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+cax = fig.add_axes([0.8, 0.27, 0.05, 0.5])
+im = ax.plot_surface(x, y, z,cmap='gnuplot', edgecolor='none')
+fig.colorbar(im, cax=cax, orientation = 'vertical')
+
+fig,ax=plt.subplots(1,1)
+levels = np.linspace(-20, 30, 40)
+cp = ax.contourf(x, y + np.pi/2, z,  levels = levels, cmap = 'jet')
+cbar = plt.colorbar(cp)
+cbar.ax.set_ylabel('power(dBm)')
+plt.ylabel('Quadrature(not to scale)')
+plt.xlabel('f-fm(Hz)')
+plt.yticks([1.5708])
+
+plt.ion()
+figure, ax = plt.subplots(figsize=(10, 8))
+line1, = ax.plot(z[0,:])
+for i in range(len(relative_z_data)):
+    line1.set_ydata(z[i,:])
+    figure.canvas.draw()
+    figure.canvas.flush_events()
+    #plt.ylim([-20, 20])
+    plt.ylim([-40, 50])
+    time.sleep(0.05)
+
+CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 10, wd, [0,0,0,0], fcs)
+
+
+fig,ax=plt.subplots(1,1)
+levels = np.linspace(-30, 90, 120)
+cp = ax.contourf(x, y, z,  levels = levels, cmap = 'jet')
+cbar = plt.colorbar(cp)
+cbar.ax.set_ylabel('power(dBm)')
+plt.ylabel('Quadrature(degree)')
+plt.xlabel('f-fm(Hz)')
+plt.yticks([89.6, 89.8, 90, 90.2, 90.4])
+
+[123763, 130000, 223324, 226000, 275306, 279000, 371437, 374000]
+
+fcs = [371571, 373300]
+fstarts = (np.array(fcs) - 150).tolist()
+fends = (np.array(fcs) + 150).tolist()
+fs = int(3.2e6)
+N = int(16e6)
+Vmaxs = [2]*len(fcs)
+Vmins = [-2]*len(fcs)
+arb_written = FG.chirps('test', fstarts, fends, fs, N, Vmaxs, Vmins)
+ps5000a.getTimeSignal()
+ps5000a.Plot('B')
+
+p = np.polyfit(relative_z_data, zs_data_list[0], 1)
+real_z = relative_z_data*p[0]
+real_z = real_z*1.8253/1e3
+real_z = real_z/np.pi*180
+angle = real_z + 90
+x,y = np.meshgrid(f,angle)
