@@ -1614,16 +1614,16 @@ ax.axvline(x=0, color='k')
 plt.show()
 
 
-fc = 120823
+fc = 259626
 ps5000a.configurePSD(10, int(1953125/5))
-freqs = np.linspace(fc-5, fc+5, 11)
+freqs = np.linspace(fc-3, fc+3, 11)
 lowcut = fc-1e3
 highcut = fc+1e3
 fs = ps5000a.getfs()
 angles = []
 amps = []
 for f in freqs:
-    FG.Sine(f, 10e-3, ch = 2)
+    FG.Sine(f, 50e-3, ch = 2)
     time.sleep(3)
     ps5000a.getTimeSignal()
     amp, angle = CH.lock_in_amplifier(ps5000a.chs['A'].timeSignal, \
@@ -2037,6 +2037,7 @@ plt.plot((temp - np.mean(temp))/np.mean(temp )+0.1)
 plt.show()
 
 plt.plot(np.linspace(0,1,len(ps5000a.chs['A'].timeSignal)), ps5000a.chs['A'].timeSignal)
+plt.plot(10*np.log10(20) + 10*np.log10(np.square(np.absolute(signal[0]))))
 
 fcs = [123763, 130000, 223324, 226000, 275306, 279000, 371437, 374000]
 zs0 = [1, 5, 10, 15]
@@ -2045,7 +2046,7 @@ CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 4, wd, minzs, fcs)
 
 
 
-
+datas_list = CH.BKA_get_data(wd)
 N = len(datas_list)
 relative_z_data_list = [[]]*N
 check_list = [[]]*N
@@ -2076,6 +2077,92 @@ signals = signals_list[iN]
 relative_z_data = relative_z_data_list[iN]
 check_data = check_data_list[iN]
 
+f = np.linspace(-100, 100, 1000)
+p = np.polyfit(relative_z_data, zs_data_list[0], 1)
+real_z = relative_z_data*p[0]
+
+formatlab = {}
+formatlab['signals'] = (signals + 3).tolist()
+formatlab['real_z'] = real_z.tolist()
+formatlab['refs'] = (3+10*np.log10(20)+10*np.log10(np.square(np.absolute(relative_z_data)))).tolist()
+formatlab['f'] = np.linspace(-100, 100, len(signals[0])+1)
+formatlab['f'] = (formatlab['f'][0:-1] + (formatlab['f'][1] - formatlab['f'][0])/2).tolist()
+fp = open(wd+'\\'+'formatlab_new.json', 'w')
+json.dump(formatlab, fp)
+fp.close()
+
+real_z = real_z*0.8
+real_z = real_z*3.6/1e3
+real_z = real_z/np.pi*180
+angle = real_z + 90
+x,y = np.meshgrid(f,angle)
+z = np.array(signals)
+for i in range(z.shape[0]):
+    z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(relative_z_data[i])))- 10*np.log10(20)
+    #z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(check_data[i])))- 10*np.log10(20)
+
+fig,ax=plt.subplots(1,1)
+levels = np.linspace(-30, 90, 120)
+cp = ax.contourf(x, y, z,  levels = levels, cmap = 'jet')
+cbar = plt.colorbar(cp)
+cbar.ax.set_ylabel('power(dBm)')
+plt.ylabel('Quadrature(degree)')
+plt.xlabel('f-fm(Hz)')
+plt.yticks([angle[0], 90, angle[-1]])
+
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+cax = fig.add_axes([0.8, 0.27, 0.05, 0.5])
+im = ax.plot_surface(x, y, z,cmap='gnuplot', edgecolor='none')
+fig.colorbar(im, cax=cax, orientation = 'vertical')
+
+plt.ion()
+figure, ax = plt.subplots(figsize=(10, 8))
+line1, = ax.plot(z[0,:])
+for i in range(len(relative_z_data)):
+    line1.set_ydata(z[i,:])
+    figure.canvas.draw()
+    figure.canvas.flush_events()
+    #plt.ylim([-20, 20])
+    #plt.ylim([-40, 50])
+    time.sleep(0.05)
+
+CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 10, wd, [0,0,0,0], fcs)
+
+fcs= [123763, 130000, 223324, 226000, 275306, 279000, 371437, 374000]
+
+fcs = [371213, 373300]
+fcs = [370998, 373300]
+fstarts = (np.array(fcs) - 150).tolist()
+fends = (np.array(fcs) + 150).tolist()
+fs = int(3.2e6)
+N = int(16e6)
+Vmaxs = [2]*len(fcs)
+Vmins = [-2]*len(fcs)
+Vmaxs = [1.1]*len(fcs)
+Vmins = [-1.1]*len(fcs)
+arb_written = FG.chirps('test', fstarts, fends, fs, N, Vmaxs, Vmins)
+ps5000a.getTimeSignal()
+ps5000a.Plot('B')
+
+fig,ax=plt.subplots(1,1)
+levels = np.linspace(-20, 30, 40)
+cp = ax.contourf(x, y + np.pi/2, z,  levels = levels, cmap = 'jet')
+cbar = plt.colorbar(cp)
+cbar.ax.set_ylabel('power(dBm)')
+plt.ylabel('Quadrature(not to scale)')
+plt.xlabel('f-fm(Hz)')
+plt.yticks([1.5708])
+
+fig,ax=plt.subplots(1,1)
+levels = np.linspace(50, 120, 40)
+cp = ax.contourf(x, y + np.pi/2, z,  levels = levels, cmap = 'jet')
+cbar = plt.colorbar(cp)
+cbar.ax.set_ylabel('power(dBm)')
+plt.ylabel('Quadrature(not to scale)')
+plt.xlabel('f-fm(Hz)')
+plt.yticks([1.5708])
+
 plt.ion()
 figure, ax = plt.subplots(figsize=(10, 8))
 line1, = ax.plot(signals[0])
@@ -2087,67 +2174,48 @@ for i in range(len(relative_z_data)):
     plt.ylim([-110, -30])
     time.sleep(0.05)
 
-f = np.linspace(-100, 100, 1000)
-angle  = relative_z_data + np.pi/2
-x,y = np.meshgrid(f,angle)
-z = np.array(signals)
-for i in range(z.shape[0]):
-    z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(relative_z_data[i])))- 10*np.log10(20)
-    #z[i,:] = z[i,:] - 10*np.log10(np.square(np.absolute(check_data[i])))- 10*np.log10(20)
-fig = plt.figure()
-ax = plt.axes(projection='3d')
-cax = fig.add_axes([0.8, 0.27, 0.05, 0.5])
-im = ax.plot_surface(x, y, z,cmap='gnuplot', edgecolor='none')
-fig.colorbar(im, cax=cax, orientation = 'vertical')
+CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 1, wd, [], fcs)
 
-fig,ax=plt.subplots(1,1)
-levels = np.linspace(-20, 30, 40)
-cp = ax.contourf(x, y + np.pi/2, z,  levels = levels, cmap = 'jet')
-cbar = plt.colorbar(cp)
-cbar.ax.set_ylabel('power(dBm)')
-plt.ylabel('Quadrature(not to scale)')
-plt.xlabel('f-fm(Hz)')
-plt.yticks([1.5708])
-
-plt.ion()
-figure, ax = plt.subplots(figsize=(10, 8))
-line1, = ax.plot(z[0,:])
-for i in range(len(relative_z_data)):
-    line1.set_ydata(z[i,:])
-    figure.canvas.draw()
-    figure.canvas.flush_events()
-    #plt.ylim([-20, 20])
-    plt.ylim([-40, 50])
-    time.sleep(0.05)
-
-CH.sweep_back_forward(prism_x, axis_z, ps5000a, zs0, 10, wd, [0,0,0,0], fcs)
+ps5000a.configurePSD(1, int(1953125/5))
+CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = False, rel = 2)
 
 
-fig,ax=plt.subplots(1,1)
-levels = np.linspace(-30, 90, 120)
-cp = ax.contourf(x, y, z,  levels = levels, cmap = 'jet')
-cbar = plt.colorbar(cp)
-cbar.ax.set_ylabel('power(dBm)')
-plt.ylabel('Quadrature(degree)')
-plt.xlabel('f-fm(Hz)')
-plt.yticks([89.6, 89.8, 90, 90.2, 90.4])
+fit = np.polyfit(np.real(data3['processed_complexC']), np.imag(data3['processed_complexC']), 1)
+k = fit[0]
+nbar = [1/np.sqrt(1+k**2), k/np.sqrt(1+k**2)]
+ds = []
+for complexC in data3['processed_complexC']:
+    ds = ds + [np.inner(nbar, [np.real(complexC), np.imag(complexC)])]
 
-[123763, 130000, 223324, 226000, 275306, 279000, 371437, 374000]
+fit = np.polyfit(np.real(data_cali['processed_complexC']), np.imag(data_cali['processed_complexC']), 1)
+k = fit[0]
+nbar = [1/np.sqrt(1+k**2), k/np.sqrt(1+k**2)]
+ds = []
+for complexC in data_cali['processed_complexC']:
+    ds = ds + [np.inner(nbar, [np.real(complexC), np.imag(complexC)])]
 
-fcs = [371571, 373300]
-fstarts = (np.array(fcs) - 150).tolist()
-fends = (np.array(fcs) + 150).tolist()
-fs = int(3.2e6)
-N = int(16e6)
-Vmaxs = [2]*len(fcs)
-Vmins = [-2]*len(fcs)
-arb_written = FG.chirps('test', fstarts, fends, fs, N, Vmaxs, Vmins)
-ps5000a.getTimeSignal()
-ps5000a.Plot('B')
+d = datas_list[0][1]
+d['complexB'] = []
+for i in range(len(d['zs'])):
+    d['complexB'] = d['complexB'] + [np.mean(d['fftBs'][i][idarray])]
 
-p = np.polyfit(relative_z_data, zs_data_list[0], 1)
-real_z = relative_z_data*p[0]
-real_z = real_z*1.8253/1e3
-real_z = real_z/np.pi*180
-angle = real_z + 90
-x,y = np.meshgrid(f,angle)
+fit = np.polyfit(np.real(d['complexB']), np.imag(d['complexB']), 1)
+d['processed_complexB'] = np.array(d['complexB']) - np.complex(0, fit[1])
+k = fit[0]
+nbar = [1/np.sqrt(1+k**2), k/np.sqrt(1+k**2)]
+ds = []
+for complexB in d['processed_complexB']:
+    ds = ds + [np.inner(nbar, [np.real(complexB), np.imag(complexB)])]
+
+factor = 1
+plt.plot(data3['zs'], data3['ds'])
+plt.plot(np.array(data_cali['zs']) - 8.25, factor*np.array(data_cali['ds']))
+plt.plot(np.array(data_cali2['zs']) - 8.25, factor*np.array(data_cali2['ds']))
+plt.show()
+
+fc = fc
+for f in np.linspace(fc - 10, fc + 10, 21)
+    FG.Sine(fc, 50e-3)
+    time.sleep(3)
+    freq, amps, angles = CH.lock_in_check(fc, ps5000a, num_of_pieces = 1)
+print(amps, angles)

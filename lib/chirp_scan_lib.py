@@ -1695,6 +1695,7 @@ def BKAdata(datas, clusterIs):
     signals_ffts = [[]]
     relative_z = []
     relative_z_data = []
+    relative_z_ref = []
     zs = []
     zs_data = []
     fN = 4848
@@ -1704,7 +1705,8 @@ def BKAdata(datas, clusterIs):
             zs = zs + [datas[i]['zs'][j]]
             if datas[i]['fordata'][j] in clusterIs:
                 zs_data = zs_data + [datas[i]['zs'][j]]
-                relative_z_data = relative_z_data + [datas[i]['complexC'][j]]
+                #relative_z_data = relative_z_data + [datas[i]['complexC'][j]]
+                relative_z_data = relative_z_data + [np.mean(datas[i]['fftBs'][j][fN-500:fN+500])]
                 signals_ffts = signals_ffts + [datas[i]['fftCs'][j][fN-500:fN+500]]
 
     del signals_ffts[0]
@@ -1715,8 +1717,9 @@ def BKAdata(datas, clusterIs):
     outphase_noise = b*np.cos(phi0)
     check_data = relative_z_data - 1j*outphase_noise*np.exp(1j*phi0)
     check = relative_z - 1j*outphase_noise*np.exp(1j*phi0)
-    relative_z_data = (np.real(check_data)+k*np.imag(check_data)/np.sqrt(1+k**2))
+    relative_z_data = (np.real(check_data)+k*np.imag(check_data))/np.sqrt(1+k**2)
     relative_z = (np.real(check)+k*np.imag(check)/np.sqrt(1+k**2))
+
     inds = np.array(relative_z_data).argsort()
     relative_z_data = np.array(relative_z_data)[inds]
     zs_data = np.array(zs_data)[inds]
@@ -1733,18 +1736,20 @@ def BKA_get_data(wd):
     max = 0
     for name in filenames:
         temp = re.findall('result_[0-9]+_ifs_([0-9]+)\.json',name)
-        temp = int(temp[0])
-        if temp > max:
-            max = temp
+        if len(temp) > 0:
+            temp = int(temp[0])
+            if temp > max:
+                max = temp
 
     datas_list = [[]]*int(max+1)
     filenames_list = [[]]*int(max+1)
     lengths = [0]*int(max+1)
     for name in filenames:
         temp = re.findall('result_[0-9]+_ifs_([0-9]+)\.json',name)
-        idx = int(temp[0])
-        lengths[idx] = lengths[idx]+1
-        filenames_list[idx] = filenames_list[idx] + [name]
+        if len(temp) > 0:
+            idx = int(temp[0])
+            lengths[idx] = lengths[idx]+1
+            filenames_list[idx] = filenames_list[idx] + [name]
 
     for i in range(len(datas_list)):
         datas_list[i] = [[]]*lengths[i]
@@ -1791,12 +1796,17 @@ def getResult_fft_sep(avg, ps5000a, fcs, prism_x, windowf = None):
     idx = np.zeros(len(fcs)*2, dtype = np.int)
     ref = [0]*len(fcs)
     signal = [0]*len(fcs)
+    psdC = np.zeros(1)
     for i in range(len(fcs)):
         idx[2*i] = np.argmin(np.absolute(ps5000a.f - fcs[i] +1000))
         idx[2*i+1] = np.argmin(np.absolute(ps5000a.f - fcs[i] -1000))
     for i in range(avg):
         fftB = fft_process(TSB[i], idx, ps5000a.getfs(), window = window)
         fftC = fft_process(TSC[i], idx, ps5000a.getfs(), window = window)
+        if i == 0:
+            psdC = ms.Single_sided_PSD(TSC[i], ps5000a.getfs())
+        else:
+            psdC = psdC + ms.Single_sided_PSD(TSC[i], ps5000a.getfs())
         #fftB = fft_process(ps5000a.chs['B'].timeSignal[TSidx[i]:TSidx[i+1]], idx)
         #fftC = fft_process(ps5000a.chs['C'].timeSignal[TSidx[i]:TSidx[i+1]], idx)
         for j in range(len(fcs)):
@@ -1808,10 +1818,11 @@ def getResult_fft_sep(avg, ps5000a, fcs, prism_x, windowf = None):
             else:
                 ref[j] = ref[j] + np.divide(fftB[j], norm)
                 signal[j] = signal[j] + np.divide(fftC[j], norm)
+    psdC = psdC/avg
     for j in range(len(fcs)):
         signal[j] = signal[j]/avg
         ref[j] = ref[j]/avg
-    return signal, ref, idx
+    return signal, ref, idx, psdC
 
 def step_sine(prism_x, ps5000a, FG, fcs, step_size):
     fms = np.linspace(fcs[0] - 10, fcs[0] + 10, int(20/step_size)+1)
