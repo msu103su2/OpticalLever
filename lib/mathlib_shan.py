@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 from scipy.signal import butter, lfilter
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
@@ -107,3 +108,9 @@ def angle_diff(angleA, angleB):
     a = [np.cos(angleA), np.sin(angleA)]
     b = [np.cos(angleB), np.sin(angleB)]
     return angle_of_two_vector(a, b)
+
+def HG(x, x0, w, P):
+    return P*np.sqrt(2/np.pi)/w*np.exp(-2*(x-x0)**2/w**2)
+
+def CumHG(x, x0, w, P):
+    return scipy.integrate.quad(HG, -np.inf, x, args=(x0, w, P))

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import time
 import sys
+import pyvisa as visa
 sys.path.append(r'C:\Program Files\Newport\Piezo Motion Control\Newport AG-UC2-UC8 Applet\Bin')
 import clr
 clr.AddReference('AgilisCmdLib')
@@ -23,6 +24,9 @@ UC2.OpenInstrument('COM4')
 controllerAddress = int(1);
 err = ''
 UC2.MR(err)
+
+rm = visa.ResourceManager('C:\\Program Files (x86)\\IVI Foundation\\VISA\\WinNT\\agvisa\\agbin\\visa32.dll')
+E4436B = rm.open_resource('GPIB1::19::INSTR')
 #
 safeRangeA = [-1, 13]
 safeRangeB = [-1, 13]
@@ -457,9 +461,6 @@ for step,i in zip(steps, range(len(steps))):
 
 for i,z in zip(range(len(psds)), zpositions):
     psds[i].tofile(wd+'\\'+'psds-z={z:.2f}.bin'.format(z = z))
-
-rm = visa.ResourceManager('C:\\Program Files (x86)\\IVI Foundation\\VISA\\WinNT\\agvisa\\agbin\\visa32.dll')
-E4436B = rm.open_resource('GPIB1::19::INSTR')
 
 t0 = time.time()
 test = ms.Single_sided_PSD(ps5000a.chs['A'].timeSignal[0:39063235], ps5000a.getfs())
@@ -1638,6 +1639,9 @@ ax2 = ax1.twinx()
 ax2.plot(freqs, amps, 'b.')
 plt.show()
 
+FG.Sine(fc, 50e-3, ch = 2)
+CH.PID_ver2(2.4, -0.03, -0.003, -0.004, fc, ps5000a, wd)
+
 ps5000a.configurePSD(10, int(1953125/5))
 t, et, DCs, ps = CH.PID(-2.4, -0.01, -0.001, -0.01, fc, ps5000a, 30)
 
@@ -2087,7 +2091,7 @@ formatlab['real_z'] = real_z.tolist()
 formatlab['refs'] = (3+10*np.log10(20)+10*np.log10(np.square(np.absolute(relative_z_data)))).tolist()
 formatlab['f'] = np.linspace(-100, 100, len(signals[0])+1)
 formatlab['f'] = (formatlab['f'][0:-1] + (formatlab['f'][1] - formatlab['f'][0])/2).tolist()
-fp = open(wd+'\\'+'formatlab_new.json', 'w')
+fp = open(wd+'\\'+'formatlab_new2.json', 'w')
 json.dump(formatlab, fp)
 fp.close()
 
@@ -2219,3 +2223,115 @@ for f in np.linspace(fc - 10, fc + 10, 21)
     time.sleep(3)
     freq, amps, angles = CH.lock_in_check(fc, ps5000a, num_of_pieces = 1)
 print(amps, angles)
+
+wd = 'Z:\\data\\optical lever project\\NORCADA_NX53515C\\manuscript_data\\backaction_cali\\nf1\\'
+data = CH.json_to_dict_cali(wd, 'result_26_ifs_0.json')
+
+minL = len(data['psdCs'][0])
+for i in range(len(data['psdCs'])):
+    if len(data['psdCs'][i]) < minL:
+        minL = len(data['psdCs'][i])
+for i in range(len(data['psdCs'])):
+    data['psdCs'][i] = data['psdCs'][:minL]
+
+formatlab = {}
+formatlab['signals'] = (3+10*np.log10(20)+10*np.log10(np.square(np.absolute(np.array(data['fftCs'][0]))))).tolist()
+formatlab['real_z'] = data['zs']
+formatlab['refs'] = (3+10*np.log10(20)+10*np.log10(np.square(np.absolute(np.array(data['fftCs'][1]))))).tolist()
+formatlab['f'] = np.linspace(-100, 100, len(signals[0])+1)
+formatlab['f'] = (formatlab['f'][0:-1] + (formatlab['f'][1] - formatlab['f'][0])/2).tolist()
+formatlab['freqs'] = (ps5000a.f).tolist()
+psdCs = np.zeros((len(data['zs']), len(data['psdCs'][0])))
+formatlab['psdCs'] = (10*np.log10(20)+ 10*np.log10(np.array(data['psdCs']))).tolist()
+fp = open(wd+'\\'+'formatlab_cali2.json', 'w')
+json.dump(formatlab, fp)
+fp.close()
+
+CH.PID_ver2(2.4, -0.03, -0.003, -0.004, fc, ps5000a, wd)
+
+for i in range(len(data['zs'])):
+    formatlab = {}
+    formatlab['z'] = data['zs'][i]
+    formatlab['psd'] = (10*np.log10(20)+ 10*np.log10(np.array(data['psdCs'][i][:minL]))).tolist()
+    fp = open(wd+'\\'+'psd{:d}.json'.format(i), 'w')
+    json.dump(formatlab, fp)
+    fp.close()
+
+zs0 = np.linspace(1, 24, 24).tolist()
+zs = zs0
+
+fcs = np.linspace(79, 81, 3).tolist()
+xcs = np.zeros((len(fcs),len(zs)))
+for fc, i in zip(fcs, range(len(fcs))):
+    E4436B.write(':FREQ:CW {f:.2f}MHz'.format(f = fc))
+    z_last = axis_z.Position()
+    if np.absolute(z_last - zs[0]) > np.absolute(z_last - zs[-1]):
+        zs.reverse()
+    for z, j in zip(zs, range(len(zs))):
+        axis_z.Quasi_MoveTo(z)
+        CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = False, rel = 2)
+        xcs[i, j] = prism_x.Position()
+
+zs = np.linspace(1, 24, 12).tolist()
+z_last = axis_z.Position()
+avg = 10
+fmo = 100
+cAs = np.zeros(len(zs), dtype = np.complex)
+cBs = np.zeros(len(zs), dtype = np.complex)
+cs = np.zeros(len(zs), dtype = np.complex)
+if np.absolute(z_last - zs[0]) > np.absolute(z_last - zs[-1]):
+    zs.reverse()
+for z, j in zip(zs, range(len(zs))):
+    axis_z.Quasi_MoveTo(z)
+    ps5000a.DC('A')
+    ps5000a.ChangeRangeTo('A', 1000)
+    CH.balancer_prism(ps5000a, prism_x, 'A', -1, 0.005, offset = 0, debug = False, rel = 2)
+    ps5000a.AC('A')
+    ps5000a.ChangeRangeTo('A', 100)
+    temp = 0
+    tempA = 0
+    tempB = 0
+    for i in range(avg):
+        ps5000a.getTimeSignal(trigger = 'D', triggerThreshold = 8000)
+        fftA = ms.Single_sided_fft(ps5000a.chs['A'].timeSignal)
+        fftB = ms.Single_sided_fft(ps5000a.chs['B'].timeSignal)
+        cA = np.sqrt(2/(ps5000a.getfs()*len(ps5000a.chs['A'].timeSignal)))*fftA[100]
+        cB = np.sqrt(2/(ps5000a.getfs()*len(ps5000a.chs['B'].timeSignal)))*fftB[100]
+        temp = temp + cA/cB*np.absolute(cB)
+        tempA = tempA + cA
+        tempB = tempB + cB
+    temp = temp/avg
+    tempA = tempA/avg
+    tempB = tempB/avg
+    cs[j] = temp
+    cAs[j] = tempA
+    cBs[j] = tempB
+
+ps5000a.getTimeSignal(trigger = 'D', triggerThreshold = 8000)
+fftA = ms.Single_sided_fft(ps5000a.chs['A'].timeSignal)
+fftB = ms.Single_sided_fft(ps5000a.chs['B'].timeSignal)
+cA = np.sqrt(2/(ps5000a.getfs()*len(ps5000a.chs['A'].timeSignal)))*fftA[100]
+cB = np.sqrt(2/(ps5000a.getfs()*len(ps5000a.chs['A'].timeSignal)))*fftB[100]
+cA/cB*np.absolute(cB)
+
+def compare(x0, w, P):
+    sim = np.zeros(n)
+    for i in range(n):
+        sim[i] = (ms.CumHG(xcs[i], x0, w, P)[0]*5e2)
+    plt.plot(xcs, powerL)
+    plt.plot(xcs, sim)
+    plt.show()
+
+
+prism
+for i in range(n):
+    ps5000a.AutoRange('A')
+    powerL[i] = np.mean(ps5000a.getTimeSignal('A'))
+    xcs[i] = prism_x.Position()
+    prism_x.MoveBy(0.1)
+
+pL = 18.5e-3
+p = np.polyfit(np.array(zs0)*1e-3, np.array(amps0)/2, 1)
+k = p[0]/(0.88*5e4)
+beta0 = 0.52e-3*k/(2*pL*0.8)
+deltaX0 = 1.25*0.125*beta0

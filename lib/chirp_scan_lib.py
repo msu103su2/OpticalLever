@@ -1327,6 +1327,7 @@ def sweep_back_forward(prism_x, axis_z, ps5000a, zs0, n_sweeps, wd, minzs, fcs, 
         signals_allfs = [[]]*Nfs
         idxs = []
         maxfs = []
+        psdCs = []
 
         for z, j in zip(zs, range(len(zs))):
             axis_z.Quasi_MoveTo(z)
@@ -1336,9 +1337,9 @@ def sweep_back_forward(prism_x, axis_z, ps5000a, zs0, n_sweeps, wd, minzs, fcs, 
             ps5000a.ChangeRangeTo('A', 2000)
 
             if fordata[j]:
-                signal, ref, idx = getResult_fft_sep(5, ps5000a, fcs, prism_x, windowf = windowf)
+                signal, ref, idx, psdC = getResult_fft_sep(5, ps5000a, fcs, prism_x, windowf = windowf)
             else:
-                signal, ref, idx = getResult_fft_sep(1, ps5000a, fcs, prism_x, windowf = windowf)
+                signal, ref, idx, psdC = getResult_fft_sep(10, ps5000a, fcs, prism_x, windowf = windowf)
 
             for ifs in range(Nfs):
                  refs_allfs[ifs] = refs_allfs[ifs] + [signal[2*ifs+1]]
@@ -1350,6 +1351,7 @@ def sweep_back_forward(prism_x, axis_z, ps5000a, zs0, n_sweeps, wd, minzs, fcs, 
             maxfs = maxfs + [maxf]
             idxs = idxs + [idx.tolist()]
             zs_measured = zs_measured +[axis_z.Position()]
+            psdCs = psdCs + [psdC.tolist()]
 
             print(zs_measured[-1])
             z_last = axis_z.Position()
@@ -1359,6 +1361,7 @@ def sweep_back_forward(prism_x, axis_z, ps5000a, zs0, n_sweeps, wd, minzs, fcs, 
             j = len(os.listdir(wd))
             dict_to_save['maxfs'] = maxfs
             dict_to_save['fordata'] = fordata
+            dict_to_save['psdCs'] = psdCs
             dict_to_json(dict_to_save, wd, 'result_{:d}_ifs_{:d}.json'.format(j, ifs))
 
         datas_list = BKA_get_data(wd)
@@ -1486,6 +1489,7 @@ def dict_to_json(target_dict, wd, filename):
     temp['processed_complexC_Re'] = (np.real(target_dict['processed_complexC'])).tolist()
     temp['processed_complexC_Im'] = (np.imag(target_dict['processed_complexC'])).tolist()
     temp['fit'] = target_dict['fit']
+    temp['psdCs'] = target_dict['psdCs']
     fftBs_Re = [[]]*len(target_dict['fftBs'])
     fftBs_Im = [[]]*len(target_dict['fftBs'])
     fftCs_Re = [[]]*len(target_dict['fftBs'])
@@ -1705,8 +1709,8 @@ def BKAdata(datas, clusterIs):
             zs = zs + [datas[i]['zs'][j]]
             if datas[i]['fordata'][j] in clusterIs:
                 zs_data = zs_data + [datas[i]['zs'][j]]
-                #relative_z_data = relative_z_data + [datas[i]['complexC'][j]]
-                relative_z_data = relative_z_data + [np.mean(datas[i]['fftBs'][j][fN-500:fN+500])]
+                relative_z_data = relative_z_data + [datas[i]['complexC'][j]]
+                #relative_z_data = relative_z_data + [np.mean(datas[i]['fftBs'][j][fN-500:fN+500])]
                 signals_ffts = signals_ffts + [datas[i]['fftCs'][j][fN-500:fN+500]]
 
     del signals_ffts[0]
@@ -1844,3 +1848,41 @@ def step_sine(prism_x, ps5000a, FG, fcs, step_size):
         print(time.time()-t0)
         print(amps[i], angles[i])
     return amps, angles, fms
+
+def json_to_dict_cali(wd, filename):
+    with open(wd+'\\'+filename, 'r') as f:
+        target_dict = json.load(f)
+    temp = {}
+    temp['zs'] = target_dict['zs']
+    temp['idxs'] = target_dict['idxs']
+    temp['maxfs'] = target_dict['maxfs']
+    temp['fordata'] = target_dict['fordata']
+    temp['complexC'] = np.array(target_dict['complexC_Re']) + 1j * np.array(target_dict['complexC_Im'])
+    temp['processed_complexC'] = np.array(target_dict['processed_complexC_Re']) + 1j * np.array(target_dict['processed_complexC_Im'])
+    temp['fit'] = target_dict['fit']
+    temp['psdCs'] = target_dict['psdCs']
+    #temp['fit'].direc = np.array(temp['fit'].direc)
+    #temp['fit'].x = np.array(temp['fit'].x)
+    fftBs = [[]]*len(target_dict['fftBs_Re'])
+    fftCs = [[]]*len(target_dict['fftBs_Re'])
+    fftpCs = [[]]*len(target_dict['fftBs_Re'])
+    for j in range(len(target_dict['fftBs_Re'])):
+        fftBs[j] = np.array(target_dict['fftBs_Re'][j]) + 1j*np.array(target_dict['fftBs_Im'][j])
+        fftCs[j] = np.array(target_dict['fftCs_Re'][j]) + 1j*np.array(target_dict['fftCs_Im'][j])
+        fftpCs[j] = np.array(target_dict['fftpCs_Re'][j]) + 1j*np.array(target_dict['fftpCs_Im'][j])
+    temp['fftBs'] = fftBs
+    temp['fftCs'] = fftCs
+    temp['processed_C'] = fftpCs
+    return temp
+
+def lock_in_amplifier_temp(signal, ref, fs, freq):
+    lowcut = freq - 10
+    highcut = freq + 10
+    T = len(signal)/fs
+    ref1 = ms.butter_bandpass_filter(ref, lowcut, highcut, fs, order=1)
+    ref2 = ms.HilbertTransform(ref1)
+    X = np.dot(signal, ref1)/T
+    Y = np.dot(signal, ref2)/T
+    amp = np.absolute(np.complex(X, Y))
+    angle = np.angle(np.complex(X, Y))
+    return amp, angle
