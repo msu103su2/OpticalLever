@@ -59,8 +59,19 @@ def butter_bandpass(lowcut, highcut, fs, order=5):
     b, a = butter(order, [low, high], btype='band')
     return b, a
 
+def butter_lowpass(highcut, fs, order=5):
+    nyq = 0.5 * fs
+    high = highcut / nyq
+    b, a = butter(order, high, btype='low')
+    return b, a
+
 def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
+
+def butter_lowpass_filter(data, highcut, fs, order=3):
+    b, a = butter_lowpass(highcut, fs, order=order)
     y = lfilter(b, a, data)
     return y
 

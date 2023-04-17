@@ -1246,6 +1246,19 @@ def lock_in_amplifier(signal, ref, fs, freq):
     angle = np.angle(np.complex(X, Y))
     return amp, angle
 
+def lock_in_amplifier_t(signal, ref, fs, freq):
+    lowcut = freq - 1000
+    highcut = freq + 1000
+    T = len(signal)/fs
+    ref1 = ms.butter_bandpass_filter(ref, lowcut, highcut, fs, order=3)
+    ref2 = ms.HilbertTransform(ref1)
+    X = ms.butter_lowpass_filter(np.multiply(signal, ref1)/T, 1e3, fs, order=3)
+    Y = ms.butter_lowpass_filter(np.multiply(signal, ref2)/T, 1e3, fs, order=3)
+    S = X+1j*Y
+    amps = np.absolute(S)
+    angles = np.angle(S)
+    return amps, angles
+
 def lock_in(freq, FG, ps5000a, num_of_pieces = 1):
     ch = 2
     freq_in_FG = float(FG.inst.query('SOUR{:d}:FREQ?'.format(ch)))
@@ -1425,7 +1438,7 @@ def PID(setPoint, kp, ki, kd, fc, ps5000a, monitorTime = None):
     plt.show()
     return t, et, DCs, ps
 
-def PID_ver2(setPoint, kp, ki, kd, fc, ps5000a, wd, monitorTime = None):
+def PID_ver2(setPoint, kp, ki, kd, fc, ps5000a, wd, initial = 1, monitorTime = None):
     bufferN = 10000
     et = np.zeros(bufferN)
     t = np.zeros(bufferN)
@@ -1439,7 +1452,7 @@ def PID_ver2(setPoint, kp, ki, kd, fc, ps5000a, wd, monitorTime = None):
     filei = 0
     lo = 0
     hi = 2
-    initial = 1
+    initial = initial
     while InRange < 10:
         freq, amps, angles = lock_in_check(fc, ps5000a, num_of_pieces = 1)
         t[i] = time.time() - t0

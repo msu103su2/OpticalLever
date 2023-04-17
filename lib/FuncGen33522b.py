@@ -58,10 +58,12 @@ class FuncGen:
             V = V + amplitude*np.sin(2*np.pi*freq*x)
         return V, fs
 
-    def arb(self, data, fs, arbname, ch = 1):
+    def arb(self, data, fs, arbname, ch = 1, clearMem = 1):
         #data in voltages
         self.inst.write('OUTPUT{:d} OFF'.format(ch))
-        self.inst.write('DATA:VOL:CLE')
+        if clearMem:
+            self.inst.write('SOUR{ch:d}:DATA:VOL:CLE'.format(ch = ch))
+
         self.inst.write('FORM:BORD SWAP')
 
         max = data.max()
